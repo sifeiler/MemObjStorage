@@ -55,7 +55,6 @@ void setUp(void) {
             .name = "prop1",
             .type = MOS_ATTR_TYPE_UINT64,
             .byte_size = 8,
-            .internal_offset = offsetof(mos_t_record, data) + offsetof(TestEntry, prop1),
             .external_offset = offsetof(TestEntry, prop1)
         },
         .index_size = 4096
@@ -245,7 +244,6 @@ void print_storage_index(const mos_t_idx* idx) {
     printf("Attr Name: %s\n", idx->attribute.name);
     printf("Attr Type: %d\n", idx->attribute.type);
     printf("Attr External Offset: 0x%08lX\n", (unsigned long)idx->attribute.external_offset);
-    printf("Attr Internal Offset: 0x%08lX\n", (unsigned long)idx->attribute.internal_offset);
     printf("---------------------------\n");
 }
 
@@ -267,7 +265,6 @@ void mos_test_mos_create_storage__check_index_area(void) {
             .name = "id",
             .type = MOS_ATTR_TYPE_UINT64,
             .byte_size = 8,
-            .internal_offset = offsetof(mos_t_record, id),
             .external_offset = MOS_NULL_OFFSET,
         },
         .offset_file = test_config.storage->storage_header->layout.offset_index_data
@@ -280,7 +277,6 @@ void mos_test_mos_create_storage__check_index_area(void) {
             .name = "prop1",
             .type = MOS_ATTR_TYPE_UINT64,
             .byte_size = 8,
-            .internal_offset = offsetof(mos_t_record, data) + offsetof(TestEntry, prop1),
             .external_offset = offsetof(TestEntry, prop1)
         },
         .offset_file = test_config.storage->storage_header->layout.offset_index_data + 8192

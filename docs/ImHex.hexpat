@@ -57,7 +57,6 @@ struct mos_t_attr_info {
     char name[32];
     u32 type;
     u64 external_offset;            // byte offset in user record
-    u64 internal_offset;            // byte offset in storage entry payload
 };
 
 struct mos_t_idx {

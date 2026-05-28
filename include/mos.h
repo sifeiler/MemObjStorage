@@ -29,7 +29,6 @@ typedef struct mos_t_attr_info {
     MOS_ATTR_TYPE type;
     uint64_t byte_size;
     uint64_t external_offset;            // byte offset in user record
-    uint64_t internal_offset;            // byte offset in storage record payload
 } mos_t_attr_info;
 #pragma pack(pop)
 
@@ -56,8 +55,10 @@ typedef struct mos_t_config {
     mos_t_idx* indexes;
     uint64_t index_count;
     uint64_t attribute_count;
+    char* storage_path;
 } mos_t_config;
 
+typedef struct mos_t_config mos_t_config;
 typedef struct mos_t_storage mos_t_storage;
 typedef struct mos_t_qry mos_t_qry;
 typedef struct mos_t_qry_bmp mos_t_qry_bmp;

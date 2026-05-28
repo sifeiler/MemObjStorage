@@ -31,12 +31,15 @@ static inline void* mos_os_mmap(int fd, size_t size) {
 #endif
 }
 
-static inline void mos_os_munmap(void* addr, size_t size) {
+
 #ifdef _WIN32
-    UnmapViewOfFile(addr);
+    static inline void mos_os_munmap(void* addr, size_t size) {
+        UnmapViewOfFile(addr);
+    }
 #else
-    munmap(addr, size);
+    static inline void mos_os_munmap(void* addr, size_t size) {
+        munmap(addr, size);
+    }
 #endif
-}
 
 #endif

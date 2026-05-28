@@ -11,9 +11,12 @@
    ========================================================================= */
 
 #define MOS_FILE_ID 0x1111CCAC
-#define MOS_FILE_LINE_SIZE 64  //in bytes
+
+// in bytes
+#define MOS_FILE_LINE_SIZE 64
 #define MOS_BIT_MAP_WIDTH 64
 #define MOS_PAGE_SIZE 4096
+#define MOS_AVG_STRING_LEN 100
 
 //Use NULL_OFFSET to indicate that something in the storage is not initialized
 #define MOS_NULL_OFFSET (uint64_t)-1

@@ -27,6 +27,7 @@ void mos_put_string(mos_t_storage* storage, mos_t_record* record, mos_t_attr_inf
 void mos_free_config(mos_t_config* cfg);
 void mos_set_bit_to_zero(mos_t_qry_bmp* bitmap, uint64_t row_id);
 void mos_set_bit_to_one(mos_t_qry_bmp* bitmap, uint64_t row_id);
+void mos_print_layout(mos_t_layout* layout);
 
 /* =========================================================================
    2. Helper Function DEFINITIONS
@@ -106,11 +107,18 @@ void mos_init_layout(mos_t_config* cfg, mos_t_layout* layout) {
     size_t header_size = MOS_ALIGN_UP(sizeof(mos_t_header), MOS_PAGE_SIZE);
     size_t attribute_size = MOS_ALIGN_UP(mos_calc_attributes_size(cfg), MOS_PAGE_SIZE);
     size_t indexes_size = MOS_ALIGN_UP(mos_calc_indexes_size(cfg), MOS_PAGE_SIZE);
-    size_t bit_map_size = MOS_ALIGN_UP(mos_calc_bitmap_size(cfg) / 8, MOS_PAGE_SIZE);
+    size_t bit_map_size = MOS_ALIGN_UP(mos_calc_bitmap_size(cfg), MOS_PAGE_SIZE);
     size_t single_record_size = mos_calc_record_size(cfg);
     size_t record_data_size = mos_calc_record_data_size(cfg);
     size_t total_records_size = MOS_ALIGN_UP((single_record_size * cfg->max_records), MOS_PAGE_SIZE);
     size_t index_data_size = MOS_ALIGN_UP(mos_calc_indexes_data_size(cfg), MOS_PAGE_SIZE);
+
+    size_t string_attr_count = 0;
+    for(uint64_t i = 0; i < cfg->attribute_count; i++) {
+        if(cfg->attributes[i].type == MOS_ATTR_TYPE_STRING) {
+            string_attr_count++;
+        }
+    }
 
     //set sizes
     layout->header_size = header_size;
@@ -122,7 +130,12 @@ void mos_init_layout(mos_t_config* cfg, mos_t_layout* layout) {
     layout->record_data_size = record_data_size;
     layout->records_size = total_records_size;
     layout->index_data_size = index_data_size;
-    layout->string_silo_size = 4096;
+
+    //later implement resizing
+    layout->string_silo_size = MOS_AVG_STRING_LEN * string_attr_count * cfg->max_records;
+    // + 20%
+    layout->string_silo_size += layout->string_silo_size * 0,2;
+    layout->string_silo_size = MOS_ALIGN_UP(layout->string_silo_size, MOS_PAGE_SIZE);
 
     layout->offset_header = 0;
     //evaluating offsets. Header starts at offset 0
@@ -294,7 +307,6 @@ mos_t_config* mos_init_internal_config(mos_t_config* external_cfg) {
 
     indexes->attribute.type = MOS_ATTR_TYPE_UINT64;
     indexes->attribute.byte_size = 8;
-    indexes->attribute.internal_offset = offsetof(mos_t_record, id);
     indexes->attribute.external_offset = MOS_NULL_OFFSET;
 
     memcpy(internal_cfg->attributes, external_cfg->attributes, sizeof(mos_t_attr_info) * external_cfg->attribute_count);
@@ -405,7 +417,7 @@ mos_t_storage* mos_create_storage(const char* file_path, mos_t_config* external_
         mos_utils_report_error("Invalid argument file_path = NULL. Cannot create storage file.");
         return NULL;
     }
-
+    
     mos_t_config* internal_cfg = mos_init_internal_config(external_cfg);
 
     if(mos_validate_config(internal_cfg) == INVALID) {
@@ -618,7 +630,7 @@ void mos_storage_remove(mos_t_storage* storage, uint64_t id) {
         mos_t_idx* index = indexes + i;
         mos_t_idx_data* index_data = MOS_GET_PTR(storage->mmap_ptr, index->offset_file);
 
-        uint8_t* key = record + index->attribute.internal_offset;
+        uint8_t* key = record + offsetof(mos_t_record, data) + index->attribute.external_offset;
         size_t key_len = index->attribute.byte_size;
         mos_idx_remove_value(index->type, index_data, key, key_len);
     }
@@ -632,29 +644,7 @@ void mos_print_header(mos_t_header* header) {
     printf("index_count %" PRIu64 "\n", header->index_count);
     printf("max_records %" PRIu64 "\n", header->max_records);
 
-    printf("Storage Header Sizes:\n");
-    printf("------------------\n");
-    printf("header_size %" PRIu64 "\n", header->layout.header_size);
-    printf("attributes_size %" PRIu64 "\n", header->layout.attributes_size);
-    printf("indexes_size %" PRIu64 "\n", header->layout.indexes_size);
-    printf("valid_bitmap_size %" PRIu64 "\n", header->layout.valid_bitmap_size);
-    printf("ready_bitmap_size %" PRIu64 "\n", header->layout.ready_bitmap_size);
-    printf("record_size %" PRIu64 "\n", header->layout.record_size);
-    printf("record_data_size %" PRIu64 "\n", header->layout.record_data_size);
-    printf("records_size %" PRIu64 "\n", header->layout.records_size);
-    printf("index_data_size %" PRIu64 "\n", header->layout.index_data_size);
-    printf("string_silo_size %" PRIu64 "\n", header->layout.string_silo_size);
-    printf("file_size %" PRIu64 "\n", header->layout.file_size);
-
-    printf("\nStorage Header Offsets:\n");
-    printf("------------------\n");
-    printf("offset_header %" PRIu64 "\n", header->layout.offset_header);
-    printf("offset_attributes %" PRIu64 "\n", header->layout.offset_attributes);
-    printf("offset_indexes %" PRIu64 "\n", header->layout.offset_indexes);
-    printf("offset_valid_bitmap %" PRIu64 "\n", header->layout.offset_valid_bitmap);
-    printf("offset_ready_bitmap %" PRIu64 "\n", header->layout.offset_ready_bitmap);
-    printf("offset_records %" PRIu64 "\n", header->layout.offset_records);
-    printf("offset_index_data %" PRIu64 "\n", header->layout.offset_index_data);
+    mos_print_layout(&header->layout);
 
     printf("\nStorage Header State:\n");
     printf("------------------\n");
@@ -663,6 +653,32 @@ void mos_print_header(mos_t_header* header) {
     printf("current_string_offset %" PRIu64 "\n", header->state.current_string_offset);
     printf("last_deleted_string.str_offset %" PRIu64 "\n", header->state.last_deleted_string.str_offset);
     printf("last_deleted_string.str_len %" PRIu32 "\n", header->state.last_deleted_string.str_len);
+}
+
+void mos_print_layout(mos_t_layout* layout) {
+    printf("Storage Header Sizes:\n");
+    printf("------------------\n");
+    printf("header_size %" PRIu64 "\n", layout->header_size);
+    printf("attributes_size %" PRIu64 "\n", layout->attributes_size);
+    printf("indexes_size %" PRIu64 "\n", layout->indexes_size);
+    printf("valid_bitmap_size %" PRIu64 "\n", layout->valid_bitmap_size);
+    printf("ready_bitmap_size %" PRIu64 "\n", layout->ready_bitmap_size);
+    printf("record_size %" PRIu64 "\n", layout->record_size);
+    printf("record_data_size %" PRIu64 "\n", layout->record_data_size);
+    printf("records_size %" PRIu64 "\n", layout->records_size);
+    printf("index_data_size %" PRIu64 "\n", layout->index_data_size);
+    printf("string_silo_size %" PRIu64 "\n", layout->string_silo_size);
+    printf("file_size %" PRIu64 "\n", layout->file_size);
+
+    printf("\nStorage Header Offsets:\n");
+    printf("------------------\n");
+    printf("offset_header %" PRIu64 "\n", layout->offset_header);
+    printf("offset_attributes %" PRIu64 "\n", layout->offset_attributes);
+    printf("offset_indexes %" PRIu64 "\n", layout->offset_indexes);
+    printf("offset_valid_bitmap %" PRIu64 "\n", layout->offset_valid_bitmap);
+    printf("offset_ready_bitmap %" PRIu64 "\n", layout->offset_ready_bitmap);
+    printf("offset_records %" PRIu64 "\n", layout->offset_records);
+    printf("offset_index_data %" PRIu64 "\n", layout->offset_index_data);
 }
 
 void mos_print_info(mos_t_storage* storage) {

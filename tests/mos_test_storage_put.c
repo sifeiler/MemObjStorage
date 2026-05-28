@@ -27,20 +27,17 @@ void setUp(void) {
     mos_t_attr_info id = {
         .name = "id",
         .type = MOS_ATTR_TYPE_UINT64,
-        .external_offset = offsetof(TestEntry, id),
-        .internal_offset = offsetof(mos_t_record, data) + offsetof(TestEntry, id)
+        .external_offset = offsetof(TestEntry, id)
     };
     mos_t_attr_info prop1 = {
         .name = "prop1",
         .type = MOS_ATTR_TYPE_UINT64,
-        .external_offset = offsetof(TestEntry, prop1),
-        .internal_offset = offsetof(mos_t_record, data) + offsetof(TestEntry, prop1)
+        .external_offset = offsetof(TestEntry, prop1)
     };
     mos_t_attr_info prop2 = {
         .name = "prop2",
         .type = MOS_ATTR_TYPE_STRING,
-        .external_offset = offsetof(TestEntry, prop2),
-        .internal_offset = offsetof(mos_t_record, data) + offsetof(TestEntry, prop2)
+        .external_offset = offsetof(TestEntry, prop2)
     };
     test_config.attribute_info[0] = id;
     test_config.attribute_info[1] = prop1;

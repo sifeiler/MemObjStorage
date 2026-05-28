@@ -58,7 +58,6 @@ void setUp(void) {
             .name = "prop1",
             .type = MOS_ATTR_TYPE_UINT64,
             .byte_size = sizeof(uint64_t),
-            .internal_offset = offsetof(mos_t_record, data) + offsetof(TestEntry, prop1),
             .external_offset = offsetof(TestEntry, prop1)
         }
     };
@@ -68,7 +67,6 @@ void setUp(void) {
         .attribute = {
             .name = "prop2",
             .type = MOS_ATTR_TYPE_STRING,
-            .internal_offset = offsetof(mos_t_record, data) + offsetof(TestEntry, prop2),
             .external_offset = offsetof(TestEntry, prop2)
         }
     };

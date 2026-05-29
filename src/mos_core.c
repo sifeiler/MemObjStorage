@@ -134,7 +134,7 @@ void mos_init_layout(mos_t_config* cfg, mos_t_layout* layout) {
     //later implement resizing
     layout->string_silo_size = MOS_AVG_STRING_LEN * string_attr_count * cfg->max_records;
     // + 20%
-    layout->string_silo_size += layout->string_silo_size * 0,2;
+    layout->string_silo_size += layout->string_silo_size * 0.2;
     layout->string_silo_size = MOS_ALIGN_UP(layout->string_silo_size, MOS_PAGE_SIZE);
 
     layout->offset_header = 0;
@@ -572,16 +572,13 @@ const mos_t_record* mos_storage_get_record(mos_t_storage* storage, uint64_t id) 
     return NULL;
 }
 
-const void* mos_storage_get(mos_t_storage* storage, uint64_t id) {
+const void* mos_storage_get_data_for_row_id(mos_t_storage* storage, uint64_t row_id) {
     mos_t_header* header = storage->storage_header;
-    mos_t_idx_data* idx_id_data = storage->idx_id_data;
-    uint8_t* key_ptr = (uint8_t*)&id;
-    int64_t record_row_id = mos_idx_get(idx_id_data, key_ptr);
 
     //there is no need to get full record if it is not valid
-    if(record_row_id >= 0 && mos_get_bit_at_row_id(storage->valid_bitmap, record_row_id)) {
+    if(row_id >= 0 && mos_get_bit_at_row_id(storage->valid_bitmap, row_id)) {
         uint8_t* record_payload = malloc(header->layout.record_data_size);
-        mos_t_record* record = MOS_GET_PTR(storage->entries, record_row_id * header->layout.record_size);
+        mos_t_record* record = MOS_GET_PTR(storage->entries, row_id * header->layout.record_size);
         memcpy(record_payload, record->data, header->layout.record_data_size);
         for (size_t i = 0; i < header->attribute_count; i++)
         {
@@ -598,6 +595,13 @@ const void* mos_storage_get(mos_t_storage* storage, uint64_t id) {
         return record_payload;
     }
     return NULL;
+}
+
+const void* mos_storage_get(mos_t_storage* storage, uint64_t id) {
+    mos_t_idx_data* idx_id_data = storage->idx_id_data;
+    uint8_t* key_ptr = (uint8_t*)&id;
+    int64_t record_row_id = mos_idx_get(idx_id_data, key_ptr);
+    return mos_storage_get_data_for_row_id(storage, record_row_id);
 }
 
 const mos_t_qry_bmp* mos_storage_search(mos_t_storage* storage, mos_t_qry* query) {

@@ -368,3 +368,37 @@ mos_t_qry_bmp* mos_qry_process_search(mos_t_storage* storage, mos_t_qry* query) 
 
     return result_clone;
 }
+
+uint64_t mos_qry_bmp_count_ones(mos_t_qry_bmp* bm) {
+    uint64_t ones = 0;
+    for(size_t i = 0; i < bm->nWords; i++) {
+        ones += fsi_popcount64(bm->data[i]);
+    }
+    return ones;
+}
+
+/**
+ * Get the index for every active bit (=1) in the bitmap.
+ * @param bm the bitmap
+ * @param row_ids
+ *  Buffer for row_ids. Each row_id is 64 Bits.
+ *  Make sure the buffer is of size int64_t * mos_qry_bmp_count_ones(bm).
+ * @return row_ids count
+ */
+uint64_t mos_qry_bmp_get_row_ids(mos_t_qry_bmp* bm, int64_t* row_ids) {
+    uint64_t ones_count = 0;
+    for (size_t i = 0; i < bm->nWords; i++) {
+        uint64_t word = bm->data[i];
+        //we skip zero words
+        while (word)
+        {
+            int bit = fsi_ctz64(word);
+            row_ids[ones_count++] = i * 64 + bit;
+            // word     = ...0100
+            // word - 1 = ...0011
+            // AND      = ...0000  ← clears the lowest set bit
+            word &= word - 1;
+        }
+    }
+    return ones_count;
+}

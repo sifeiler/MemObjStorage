@@ -93,8 +93,9 @@ void mos_test_mos_init_layout__layout_correct(void) {
     uint64_t exp_record_data_size = 16;
     uint64_t exp_records_size = MOS_ALIGN_UP(100 * exp_record_size, 4096);
     uint64_t exp_index_data_size = 2 * 8192;
-    uint64_t exp_string_silo_size = 4096;
-    uint64_t exp_file_size = 45056;
+    //no string attributes, so string_silo is of size 0
+    uint64_t exp_string_silo_size = 0;
+    uint64_t exp_file_size = 40960;
 
     //Act
     mos_t_config* internal_config = mos_init_internal_config(&test_config.config);
@@ -182,8 +183,8 @@ void mos_test_mos_create_storage__check_header_area(void) {
             .record_data_size = 16,
             .records_size = 4096,
             .index_data_size = 16384,
-            .string_silo_size = 4096,
-            .file_size = 45056,
+            .string_silo_size = 0,
+            .file_size = 40960,
             .offset_header = 0,
             .offset_attributes = 4096,
             .offset_indexes = 8192,

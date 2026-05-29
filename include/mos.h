@@ -126,21 +126,24 @@ void mos_storage_remove(mos_t_storage* storage, uint64_t id);
  * Every record matching the search query, is represented by a 1 in the bitmap.
  * 
  * Call:
- * @see mos_storage_get_row_id(row_id)
- *  To get the pointer to memory of an item. row_id is the index of a 1 bit of the bitmap.
+ * @see mos_storage_get_data_for_row_id(storage, row_id)
+ *  To get a pointer of the record at row_id. row_id is the index of a 1 bit of the bitmap.
  * 
- * @see mos_storage_get_ptrs(bitmap)
- *  To get pointers to memory of all items having a 1 in the bitmap.
+ * @see mos_storage_get_row_ids(storage, bitmap)
+ *  To get indexes of all 1s in the bitmap.
  * 
- * @see mos_storage_get_data(bitmap)
- *  To get copies of all items having a 1 in the bitmap.
- *  The caller is responsible for freeing the copies when no longer needed.
+ * @see mos_storage_get_data(storage, bitmap)
+ *  To get pointers to all records having a 1 in the bitmap.
  */
 const mos_t_qry_bmp* mos_storage_search(mos_t_storage* storage, mos_t_qry* query);
 
-const void* mos_storage_get_row_id(uint64_t row_id);
-const uint64_t* mos_storage_get_ptrs(uint64_t* bitmap);
-const void* mos_storage_get_data(uint64_t* bitmap);
+/**
+ * The returned record is copied from memory and allocated on heap.
+ * The caller is responsible for freeing it.
+*/
+const void* mos_storage_get_data_for_row_id(mos_t_storage* storage, uint64_t row_id);
+const void* mos_storage_get_row_ids(mos_t_storage* storage, mos_t_qry_bmp* bitmap);
+const void* mos_storage_get_data(mos_t_storage* storage, mos_t_qry_bmp* bitmap);
 
 void mos_print_info(mos_t_storage* storage);
 void mos_print_state(mos_t_storage* storage);

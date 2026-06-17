@@ -34,7 +34,7 @@ void test_mos_idx_hmap_init__even_item_count(void) {
     mos_idx_hmap_init(20, &index_data->index, index_data);
 
     //Assert
-    mos_t_idx_hmap* idx_hash_map = (mos_t_idx*)index_data->index_payload;
+    mos_t_idx_hmap* idx_hash_map = (mos_t_idx_hmap*)index_data->index_payload;
     TEST_ASSERT_EQUAL(expected_index_size, index_data->index.index_size);
     TEST_ASSERT_EQUAL(expected_table_size, idx_hash_map->index_header.table_size);
     TEST_ASSERT_EQUAL(expected_offset_values, idx_hash_map->index_header.offset_values);
@@ -51,7 +51,7 @@ void test_mos_idx_hmap_init__odd_item_count(void) {
     index_data->index.type = MOS_IDX_HASH_MAP;
     index_data->index.index_size = 0;
 
-    mos_t_idx_hmap* hash_map_index = (mos_t_idx*)index_data->index_payload;
+    mos_t_idx_hmap* hash_map_index = (mos_t_idx_hmap*)index_data->index_payload;
     hash_map_index->index_header.table_size = 8;
 
     // value will be aligned up to page size and in this case the index fits into a single page
@@ -66,7 +66,7 @@ void test_mos_idx_hmap_init__odd_item_count(void) {
     mos_idx_hmap_init(11, &index_data->index, index_data);
 
     //Assert
-    mos_t_idx_hmap* idx_hash_map = (mos_t_idx*)index_data->index_payload;
+    mos_t_idx_hmap* idx_hash_map = (mos_t_idx_hmap*)index_data->index_payload;
     TEST_ASSERT_EQUAL(expected_index_size, index_data->index.index_size);
     TEST_ASSERT_EQUAL(expected_table_size, idx_hash_map->index_header.table_size);
     TEST_ASSERT_EQUAL(expected_offset_values, idx_hash_map->index_header.offset_values);
@@ -94,7 +94,7 @@ void test_mos_idx_hmap_put__first_slot_available(void) {
     index_data->index.type = MOS_IDX_HASH_MAP;
     index_data->index.index_size = 0;
 
-    mos_t_idx_hmap* hash_map_index = (mos_t_idx*)index_data->index_payload;
+    mos_t_idx_hmap* hash_map_index = (mos_t_idx_hmap*)index_data->index_payload;
     hash_map_index->index_header.table_size = 8;
 
     uint8_t key1 = 1;
@@ -135,7 +135,7 @@ void test_mos_idx_hmap_put__first_slot_occupied(void) {
     index_data->index.type = MOS_IDX_HASH_MAP;
     index_data->index.index_size = 0;
 
-    mos_t_idx_hmap* hash_map_index = (mos_t_idx*)index_data->index_payload;
+    mos_t_idx_hmap* hash_map_index = (mos_t_idx_hmap*)index_data->index_payload;
     hash_map_index->index_header.table_size = 8;
     uint64_t* index_values = hash_map_index->data;
     uint64_t* index_verifiers = hash_map_index->data + hash_map_index->index_header.table_size;
@@ -168,7 +168,7 @@ void test_mos_idx_hmap_put__table_full(void) {
     index_data->index.type = MOS_IDX_HASH_MAP;
     index_data->index.index_size = 0;
 
-    mos_t_idx_hmap* hash_map_index = (mos_t_idx*)index_data->index_payload;
+    mos_t_idx_hmap* hash_map_index = (mos_t_idx_hmap*)index_data->index_payload;
     hash_map_index->index_header.table_size = 4;
     uint64_t* index_values = hash_map_index->data;
     uint64_t* index_verifiers = hash_map_index->data + hash_map_index->index_header.table_size;

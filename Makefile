@@ -67,7 +67,7 @@ test: $(LIB_OBJS) $(TEST_BINS)
 	@echo "---------------------------------------"
 
 $(TEST_DIR)/%: $(TEST_DIR)/%.c $(LIB_OBJS) tests/unity.c
-	$(CC) $(SANITIZERS) $(CFLAGS_TEST) $^ -o $@
+	$(CC) $(CFLAGS_TEST) $^ -o $@
 
 clean:
 	rm -rf $(OBJ_DIR) $(TARGET)

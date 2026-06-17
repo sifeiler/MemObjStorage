@@ -3,6 +3,7 @@
 
 #include "mos_internal.h"
 #include "mos_os.h"
+#include "mos_types_fwd.h"
 
 /* =========================================================================
    FUNCTION DECLARATIONS

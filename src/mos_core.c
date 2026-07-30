@@ -13,6 +13,7 @@
 #include "../include/mos_idx.h"
 #include "../include/mos_os.h"
 #include "../include/mos_qry.h"
+#include "../include/mos_string.h"
 
 /* =========================================================================
    1. FORWARD DECLARATIONS
@@ -38,7 +39,7 @@ void mos_print_layout(mos_t_layout* layout);
 * return 1 if VALID, 0 if INVALID
 */
 int mos_check_record_bounds(mos_t_header* header, uint64_t record_row_id) {
-    if(record_row_id >= 0 && (record_row_id <= header->max_records)) {
+    if(record_row_id >= 0 && (record_row_id < header->max_records)) {
         return VALID;
     }
     return INVALID;
@@ -132,10 +133,10 @@ void mos_init_layout(mos_t_config* cfg, mos_t_layout* layout) {
     layout->index_data_size = index_data_size;
 
     //later implement resizing
-    layout->string_silo_size = MOS_AVG_STRING_LEN * string_attr_count * cfg->max_records;
+    uint64_t string_silo_size = MOS_AVG_STRING_LEN * string_attr_count * cfg->max_records;
     // + 20%
-    layout->string_silo_size += layout->string_silo_size * 0.2;
-    layout->string_silo_size = MOS_ALIGN_UP(layout->string_silo_size, MOS_PAGE_SIZE);
+    string_silo_size += string_silo_size * 0.2;
+    layout->string_silo_size = MOS_ALIGN_UP(string_silo_size, MOS_PAGE_SIZE);
 
     layout->offset_header = 0;
     //evaluating offsets. Header starts at offset 0
@@ -158,10 +159,8 @@ void mos_init_layout(mos_t_config* cfg, mos_t_layout* layout) {
     layout->offset_index_data = offset;
 
     offset += index_data_size;
+    layout->offset_string_silo = offset;
 
-    //string silo size
-    //TODO: make string silo configurable via cfg
-    // string grows from the end of the file up to layout->offset_index_data + calc_indexes_data_size
     offset += layout->string_silo_size;
 
     layout->file_size = offset;
@@ -173,8 +172,14 @@ uint64_t mos_get_current_time_millis() {
     //tv_usec = microseconds
     return (int64_t)tv.tv_sec * 1000LL + (tv.tv_usec / 1000LL);
 }
-
 void mos_idx_id_put(mos_t_storage* storage, uint64_t id, uint64_t record_row_id) {
+    mos_t_idx* id_idx = storage->indexes;
+    mos_t_idx_data* id_idx_data = MOS_GET_PTR(storage->mmap_ptr, id_idx->offset_file);
+    uint8_t* key_ptr = (uint8_t*)&id;
+    mos_idx_put(id_idx->type, id_idx_data, key_ptr, sizeof(id), record_row_id);
+}
+
+void mos_idx_id_remove(mos_t_storage* storage, uint64_t id, uint64_t record_row_id) {
     mos_t_idx* id_idx = storage->indexes;
     mos_t_idx_data* id_idx_data = MOS_GET_PTR(storage->mmap_ptr, id_idx->offset_file);
     uint8_t* key_ptr = (uint8_t*)&id;
@@ -248,39 +253,12 @@ index1index2    v
 str3str2str1    |
 */
 void mos_put_string(mos_t_storage* storage, mos_t_record* record, mos_t_attr_info* attribute, mos_t_string* str) {
-    mos_t_header* header = storage->storage_header;
-    mos_t_layout* layout = &header->layout;
-    mos_t_state* state = &header->state;
-
-    char* value = str->str;
-    uint64_t str_len = str->str_len;
-
-    uint64_t new_str_offset_from_top = layout->file_size - state->current_string_offset - str_len;
-    uint64_t offset = MOS_NULL_OFFSET;
-
-    //TODO: check if neighboring string was deleted too. In that case they could be combined.
-    //probably best to do on deletion.
-    if((state->last_deleted_string.str_offset != MOS_NULL_OFFSET) 
-        && (str_len <= state->last_deleted_string.str_len)) {
-        offset = state->last_deleted_string.str_offset;
-    } else if (new_str_offset_from_top > (layout->offset_index_data + layout->index_data_size)) {
-        offset = state->current_string_offset + str_len;
-    }
-
-    if(offset != MOS_NULL_OFFSET) {
-        char* str_ptr = MOS_GET_PTR(storage->mmap_ptr, layout->file_size - offset);
-        memcpy(str_ptr, value, str_len);
-        mos_t_string_desc* str_desc = (mos_t_string_desc*)(record->data + attribute->external_offset);
-        str_desc->str_offset = offset;
-        str_desc->str_len = str_len;
-
-        //go one byte up in the string silo and align down to nearest multiple of 8
-        //state->current_string_offset = ALIGN_DOWN(offset - 1, 8);
-
-        state->current_string_offset = offset;
-    } else {
-        mos_utils_report_error("Cannot store string. String silo is full. You need to resize.");
-    }
+    //mos_t_string_desc* str_desc = (mos_t_string_desc*)(record->data + attribute->external_offset);
+    // Put the string descriptor at the exact same position where the actual string was stored in the record. 
+    //  This is neccessary to get fixed size records. The actual string is moved into the string silo by mos_string_put.
+    //  TODO: Do not use the same pointer for both, the actual string and the string descriptor, 
+    //        as this can go horribly wrong if mos_string_put writes at the descriptor address before coping the actual string from the address.
+    mos_string_put(storage->string_silo_base, &storage->storage_header->string_silo, str, str);
 }
 
 /* =========================================================================
@@ -339,6 +317,7 @@ void mos_map_storage_pointers(mos_t_storage* storage, void* mmap_ptr, mos_t_layo
     storage->entries = MOS_GET_PTR(mmap_ptr, layout->offset_records);
     storage->ready_bitmap = MOS_GET_PTR(mmap_ptr, layout->offset_ready_bitmap);
     storage->valid_bitmap = MOS_GET_PTR(mmap_ptr, layout->offset_valid_bitmap);
+    storage->string_silo_base = MOS_GET_PTR(mmap_ptr, layout->offset_string_silo);
 }
 
 mos_t_storage* mos_load_storage(const char* file_path) {
@@ -467,14 +446,17 @@ mos_t_storage* mos_create_storage(const char* file_path, mos_t_config* external_
     storage_header->max_records = internal_cfg->max_records;
     memcpy(&(storage_header->layout), &layout, sizeof(mos_t_layout));
 
+    mos_t_string_silo* string_silo = &(storage_header->string_silo);
+    string_silo->base_offset = layout.offset_string_silo;
+    string_silo->current_offset = 0;
+    string_silo->size = layout.string_silo_size;
+    string_silo->last_deleted.str_len = 0;
+    string_silo->last_deleted.str_offset = MOS_NULL_OFFSET;
+
     mos_t_state* storage_state = &(storage_header->state);
     //record offsets are calculated from record area start
     storage_state->next_free_row_id = 0;
     storage_state->last_deleted_row_id = MOS_NULL_OFFSET;
-
-    //strings grow in the string silo, placed at the bottom of the file. The offset is also calculated from the end of the file. We start at offset 0
-    storage_state->current_string_offset = 0;
-    storage_state->last_deleted_string.str_offset = MOS_NULL_OFFSET;
 
     //writing storage attributes to file
     memcpy(storage->attributes, internal_cfg->attributes, sizeof(mos_t_attr_info) * internal_cfg->attribute_count);
@@ -552,12 +534,12 @@ void mos_storage_put(mos_t_storage* storage, uint64_t id, void* record_data) {
     }
 }
 
-const char* mos_storage_get_string(mos_t_storage* storage, mos_t_string_desc sd) {
-    if (sd.str_offset == MOS_NULL_OFFSET || sd.str_len == 0) {
-        return NULL;
+void mos_storage_get_string(mos_t_storage* storage, mos_t_string_desc* sd, char** result) {
+    if (sd->str_offset == MOS_NULL_OFFSET || sd->str_len == 0) {
+        result = NULL;
+        return;
     }
-    // pointer directly into the mmap region
-    return (const char*)((uint8_t*)storage->mmap_ptr + storage->storage_header->layout.file_size - sd.str_offset);
+    mos_string_get(storage->string_silo_base, &storage->storage_header->string_silo, sd, result);
 }
 
 const mos_t_record* mos_storage_get_record(mos_t_storage* storage, uint64_t id) {
@@ -586,9 +568,8 @@ const void* mos_storage_get_data_for_row_id(mos_t_storage* storage, uint64_t row
             //strings need special treatment
             if(attribute.type == MOS_ATTR_TYPE_STRING) {
                 mos_t_string_desc sd = *(mos_t_string_desc*)MOS_GET_PTR(record->data, attribute.external_offset);
-                const char* str = mos_storage_get_string(storage, sd);
                 mos_t_string* dest_string = (mos_t_string*)(record_payload + attribute.external_offset);
-                dest_string->str = str;
+                mos_storage_get_string(storage, &sd, &dest_string->str);
                 dest_string->str_len = sd.str_len;
             }
         }
@@ -601,6 +582,11 @@ const void* mos_storage_get(mos_t_storage* storage, uint64_t id) {
     mos_t_idx_data* idx_id_data = storage->idx_id_data;
     uint8_t* key_ptr = (uint8_t*)&id;
     int64_t record_row_id = mos_idx_get(idx_id_data, key_ptr);
+
+    if(record_row_id == VALUE_NOT_FOUND) {
+        return NULL;
+    }
+
     return mos_storage_get_data_for_row_id(storage, record_row_id);
 }
 
@@ -630,7 +616,7 @@ void mos_storage_remove(mos_t_storage* storage, uint64_t id) {
 
     mos_t_idx* indexes = storage->indexes;
     //skip id index
-    for (uint64_t i = 0; i < header->index_count; i++) {
+    for (uint64_t i = 1; i < header->index_count; i++) {
         mos_t_idx* index = indexes + i;
         mos_t_idx_data* index_data = MOS_GET_PTR(storage->mmap_ptr, index->offset_file);
 
@@ -638,6 +624,7 @@ void mos_storage_remove(mos_t_storage* storage, uint64_t id) {
         size_t key_len = index->attribute.byte_size;
         mos_idx_remove_value(index->type, index_data, key, key_len);
     }
+    mos_idx_id_remove(storage, id, record_row_id);
 }
 
 void mos_print_header(mos_t_header* header) {
@@ -654,9 +641,8 @@ void mos_print_header(mos_t_header* header) {
     printf("------------------\n");
     printf("next_free_row_id %" PRIu64 "\n", header->state.next_free_row_id);
     printf("last_deleted_row_id %" PRIu64 "\n", header->state.last_deleted_row_id);
-    printf("current_string_offset %" PRIu64 "\n", header->state.current_string_offset);
-    printf("last_deleted_string.str_offset %" PRIu64 "\n", header->state.last_deleted_string.str_offset);
-    printf("last_deleted_string.str_len %" PRIu32 "\n", header->state.last_deleted_string.str_len);
+    printf("last_deleted string length %" PRIu32 "\n", header->string_silo.last_deleted.str_len);
+    printf("last_deleted string offset %" PRIu64 "\n", header->string_silo.last_deleted.str_offset);
 }
 
 void mos_print_layout(mos_t_layout* layout) {
@@ -683,6 +669,7 @@ void mos_print_layout(mos_t_layout* layout) {
     printf("offset_ready_bitmap %" PRIu64 "\n", layout->offset_ready_bitmap);
     printf("offset_records %" PRIu64 "\n", layout->offset_records);
     printf("offset_index_data %" PRIu64 "\n", layout->offset_index_data);
+    printf("offset_string_silo %" PRIu64 "\n", layout->offset_string_silo);
 }
 
 void mos_print_info(mos_t_storage* storage) {
@@ -697,7 +684,4 @@ void mos_print_state(mos_t_storage* storage) {
     printf("------------------\n");
     printf("next_free_row_id %" PRIu64 "\n", state.next_free_row_id);
     printf("last_deleted_row_id %" PRIu64 "\n", state.last_deleted_row_id);
-    printf("current_string_offset %" PRIu64 "\n", state.current_string_offset);
-    printf("last_deleted_string_offset %" PRIu64 "\n", state.last_deleted_string.str_offset);
-    printf("last_deleted_string_size %" PRIu32 "\n", state.last_deleted_string.str_len);
 }

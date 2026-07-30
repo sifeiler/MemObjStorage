@@ -4,10 +4,12 @@
 #include <stdlib.h>
 #include <errno.h>
 #include <inttypes.h>
+#include <string.h>
 
 #include "../include/mos.h"
 #include "../include/mos_internal.h"
 #include "../include/mos_idx.h"
+#include "../include/mos_utils.h"
 
 typedef struct {
     uint64_t prop1;
@@ -140,6 +142,9 @@ void mos_test_mos_init_layout__layout_correct(void) {
     TEST_ASSERT_EQUAL(expected_offset, layout.file_size);
     TEST_ASSERT_EQUAL(expected_offset, exp_file_size);
 
+    free(internal_config->attributes);
+    free(internal_config->indexes);
+    free(internal_config);
     after_test();
 }
 
@@ -191,13 +196,20 @@ void mos_test_mos_create_storage__check_header_area(void) {
             .offset_valid_bitmap = 12288,
             .offset_ready_bitmap = 16384,
             .offset_records = 20480,
-            .offset_index_data = 24576
+            .offset_index_data = 24576,
+            .offset_string_silo = 40960
         },
         .state = {
-            .last_deleted_string.str_offset = MOS_NULL_OFFSET,
-            .current_string_offset = 0,
             .last_deleted_row_id = MOS_NULL_OFFSET,
             .next_free_row_id = 0
+        },
+        .string_silo = {
+            .base_offset = 40960,
+            .current_offset = 0,
+            .last_deleted = {
+                .str_offset = MOS_NULL_OFFSET,
+                .str_len = 0
+            }
         }
     };
     //copy expected header to the front of the array and zero out the padding
@@ -415,6 +427,8 @@ void mos_test_mos_load_storage(void) {
     TEST_ASSERT_EQUAL_MEMORY(storage_file, loaded_storage->mmap_ptr, file_size);
 
     assert_storage_ptrs(loaded_storage->mmap_ptr, &loaded_storage->storage_header->layout, loaded_storage);
+    
+    mos_free_storage(loaded_storage);
 }
 
 int main(void) {

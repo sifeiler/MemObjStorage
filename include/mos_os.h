@@ -17,6 +17,7 @@
 
 #ifdef _WIN32
     #include <intrin.h>
+    #include <errno.h>
     
     static inline void* mos_os_mmap(int fd, size_t size) {
         HANDLE hFile = (HANDLE)_get_osfhandle(fd);
@@ -43,6 +44,22 @@
         #define fsi_ctz64(x) __builtin_ctzll(x)
         #define fsi_popcount64(x) __builtin_popcountll(x)
     #endif
+
+    static inline int mos_os_mem_alloc_aligned(void** ptr, size_t size, size_t align) {
+        if ((align & (align - 1)) != 0 || align % sizeof(void*) != 0) {
+            return EINVAL;
+        }
+
+        *ptr =_aligned_malloc(size, align);
+
+        if(*ptr == NULL) {
+            return -1;
+        }
+    }
+
+    static inline void mos_os_mem_free_aligned(void* ptr) {
+        _aligned_free(ptr);
+    }
 #else
 
     #define fsi_popcount64(x) __builtin_popcountll(x)
@@ -58,6 +75,14 @@
 
     static inline void mos_os_munmap(void* addr, size_t size) {
         munmap(addr, size);
+    }
+
+    static inline int mos_os_mem_alloc_aligned(void** ptr, size_t size, size_t align) {
+        return posix_memalign(ptr, align, size);
+    }
+
+    static inline void mos_os_mem_free_aligned(void* ptr) {
+        free(ptr);
     }
 
 #endif

@@ -21,6 +21,7 @@ typedef struct {
 } CreateTestConfig;
 
 static CreateTestConfig test_config = {0};
+static mos_t_qry_bmp* result;
 
 void setUp(void) {
     mos_t_config storage_config = {
@@ -77,6 +78,8 @@ void setUp(void) {
     //point test_config to global static array and not to stack (avoid dangling pointer)
     test_config.storage_config.attributes = test_config.attribute_info;
     test_config.storage_config.indexes = test_config.indexes;
+
+    result = NULL;
 }
 
 void tearDown(void) {
@@ -87,6 +90,10 @@ void tearDown(void) {
 
     // reset static struct to start clean for next test
     memset(&test_config, 0, sizeof(test_config));
+
+    if(result) {
+        free(result);
+    }
 }
 
 void test_storage_search__logical_and(void) {
@@ -134,7 +141,7 @@ void test_storage_search__logical_and(void) {
     };
 
     //Act
-    const mos_t_qry_bmp* result = mos_storage_search(storage, &query);
+    result = (mos_t_qry_bmp*)mos_storage_search(storage, &query);
 
     //Assert
     TEST_ASSERT_EQUAL_INT(4, result->nBits);
@@ -200,7 +207,7 @@ void test_storage_search__logical_or(void) {
     };
 
     //Act
-    const mos_t_qry_bmp* result = mos_storage_search(storage, &query);
+    result = (mos_t_qry_bmp*)mos_storage_search(storage, &query);
 
     //Assert
     TEST_ASSERT_EQUAL_INT(4, result->nBits);
@@ -266,7 +273,7 @@ void test_storage_search__logical_not(void) {
     };
 
     //Act
-    const mos_t_qry_bmp* result = mos_storage_search(storage, &query);
+    result = (mos_t_qry_bmp*)mos_storage_search(storage, &query);
 
     //Assert
     TEST_ASSERT_EQUAL_INT(4, result->nBits);

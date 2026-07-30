@@ -3,11 +3,13 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <errno.h>
+#include <inttypes.h> // Required for PRIu64
+#include <string.h>
+
 #include "../include/mos.h"
 #include "../include/mos_internal.h"
 #include "../include/mos_idx_hmap.h"
 #include "../include/mos_idx.h"
-#include <inttypes.h> // Required for PRIu64
 
 void setUp(void) {}
 

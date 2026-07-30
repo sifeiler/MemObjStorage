@@ -10,6 +10,17 @@
 
 #define VALUE_NOT_FOUND -1
 
+//Use NULL_OFFSET to indicate that something in the storage is not initialized
+#define MOS_NULL_OFFSET (uint64_t)-1
+
+//smallest multiple of align where addr fits in
+//i.e. align = 64, addr = 100 -> (100 + 64 - 1) & ~0011 1111 = 1000 0000 = 128
+#define MOS_ALIGN_UP(addr, align) (((addr) + (align) - 1) & ~((align) - 1))
+#define MOS_ALIGN_DOWN(addr, align) ((addr) & ~((align) - 1))
+
+//calculates pointer to location in storage file
+#define MOS_GET_PTR(base_ptr, offset) ((void*)((uint8_t*)(base_ptr) + (offset)))  
+
 static inline void mos_utils_report_error(const char* input, ...) {
     va_list args;
     va_start(args, input);

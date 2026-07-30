@@ -5,6 +5,7 @@
 #include <stdint.h>
 #include "mos_types_fwd.h"
 #include "mos.h"
+#include "mos_string.h"
 
 /* =========================================================================
    1. CONSTANTS, MACROS, ENUMS
@@ -17,17 +18,6 @@
 #define MOS_BIT_MAP_WIDTH 64
 #define MOS_PAGE_SIZE 4096
 #define MOS_AVG_STRING_LEN 100
-
-//Use NULL_OFFSET to indicate that something in the storage is not initialized
-#define MOS_NULL_OFFSET (uint64_t)-1
-
-//smallest multiple of align where addr fits in
-//i.e. align = 64, addr = 100 -> (100 + 64 - 1) & ~0011 1111 = 1000 0000 = 128
-#define MOS_ALIGN_UP(addr, align) (((addr) + (align) - 1) & ~((align) - 1))
-#define MOS_ALIGN_DOWN(addr, align) ((addr) & ~((align) - 1))
-
-//calculates pointer to location in storage file
-#define MOS_GET_PTR(base_ptr, offset) ((void*)((uint8_t*)(base_ptr) + (offset)))  
 
 typedef enum ATTRIBUTE_TYPE ATTRIBUTE_TYPE;
 
@@ -45,13 +35,6 @@ static const uint8_t TYPE_SIZES[] = {
 /* =========================================================================
    2. STRUCTS
    ========================================================================= */
-
-#pragma pack(push, 1)
-typedef struct mos_t_string_desc {
-    uint64_t str_offset;
-    uint32_t str_len;
-} mos_t_string_desc;
-#pragma pack(pop)
 
 #pragma pack(push, 1)
 typedef struct mos_t_layout {
@@ -76,6 +59,7 @@ typedef struct mos_t_layout {
     uint64_t offset_ready_bitmap;
     uint64_t offset_records;
     uint64_t offset_index_data;
+    uint64_t offset_string_silo;
 } mos_t_layout;
 #pragma pack(pop)
 
@@ -83,10 +67,6 @@ typedef struct mos_t_layout {
 typedef struct mos_t_state {
     uint64_t next_free_row_id;
     uint64_t last_deleted_row_id;
-    //growing from bottom towards index data
-    uint64_t current_string_offset;
-    //to reuse empty spaces within the silo
-    mos_t_string_desc last_deleted_string;
 } mos_t_state;
 #pragma pack(pop)
 
@@ -99,6 +79,7 @@ typedef struct mos_t_header {
 
     mos_t_layout layout;
     mos_t_state state;
+    mos_t_string_silo string_silo;
 } mos_t_header;
 #pragma pack(pop)
 
@@ -119,11 +100,12 @@ typedef struct mos_t_storage {
     mos_t_record* entries;          // array of entries
     mos_t_idx_data* idx_id_data;    // record id index
     mos_t_idx_data* index_data;     // attribute index data
-    mos_t_qry_bmp* valid_bitmap;     // 1 bit for every record
-    mos_t_qry_bmp* ready_bitmap;     // 1 bit for every record
+    mos_t_qry_bmp* valid_bitmap;    // 1 bit for every record
+    mos_t_qry_bmp* ready_bitmap;    // 1 bit for every record
     void* mmap_ptr;                 // pointer to the memory mapped file
     char* file_path;                // path to the memory mapped file
     int fd;                         // memory mapped file (open)
+    void* string_silo_base;         // pointer to the string silo area
 } mos_t_storage;
 
 //Search engine structs

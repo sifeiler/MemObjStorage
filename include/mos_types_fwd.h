@@ -18,6 +18,7 @@ typedef struct mos_t_idx_hmap mos_t_idx_hmap;
 typedef enum MOS_ATTR_TYPE MOS_ATTR_TYPE;
 typedef struct mos_t_string mos_t_string;
 typedef struct mos_t_string_desc mos_t_string_desc;
+typedef struct mos_t_string_silo mos_t_string_silo;
 typedef struct mos_t_attr_info mos_t_attr_info;
 typedef struct mos_t_config mos_t_config;
 typedef struct mos_t_layout mos_t_layout;

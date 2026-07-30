@@ -3,7 +3,7 @@
 #include "../include/mos_types_fwd.h"
 #include "../include/mos_idx_hmap.h"
 #include "../include/mos_idx.h"
-#include "../include/mos.h"
+#include "../include/mos_utils.h"
 #include "../include/mos_internal.h"
 
 void mos_idx_init(const uint64_t record_count, mos_t_idx* idx, mos_t_idx_data* idx_data);

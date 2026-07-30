@@ -24,11 +24,12 @@ typedef struct {
 } CreateTestConfig;
 
 static CreateTestConfig test_config = {0};
+static TestEntry* result1;
 
 void setUp(void) {
     mos_t_config storage_config = {
-        .index_count = 1,
-        .attribute_count = 2,
+        .index_count = 1,               //only one external index
+        .attribute_count = 3,
         .max_records = 100
     };
     test_config.storage_config = storage_config;
@@ -78,9 +79,6 @@ void setUp(void) {
 }
 
 void tearDown(void) {
-}
-
-void after_test() {
     if(test_config.storage != NULL) {
         mos_free_storage(test_config.storage);
         test_config.storage = NULL;
@@ -88,6 +86,10 @@ void after_test() {
 
     // reset static struct to start clean for next test
     memset(&test_config, 0, sizeof(test_config));
+
+    if(result1) {
+        free(result1);
+    }
 }
 
 void mos_storage_remove__remove_record(void) {
@@ -103,8 +105,9 @@ void mos_storage_remove__remove_record(void) {
     uint64_t id1 = 1;
     mos_storage_put(test_config.storage, id1, &entry);
 
-    TestEntry* result = (TestEntry*)mos_storage_get(test_config.storage, id1); // Get first slot
-    TEST_ASSERT_EQUAL_INT64(1, result->id);
+    result1 = (TestEntry*)mos_storage_get(test_config.storage, id1); // Get first slot
+    TEST_ASSERT_NOT_NULL(result1);
+    TEST_ASSERT_EQUAL_INT64(1, result1->id);
 
     //Act
     mos_storage_remove(test_config.storage, id1);
@@ -115,8 +118,6 @@ void mos_storage_remove__remove_record(void) {
 
     //TODO: further assert bitmaps, indexes etc.
     mos_t_qry_bmp* valid_bitmap = test_config.storage->valid_bitmap;
-    
-    after_test();
 }
 
 int main(void) {

@@ -6,6 +6,7 @@
 
 #include "../include/mos_qry.h"
 #include "../include/mos_internal.h"
+#include "../include/mos_utils.h"
 #include "../include/mos_idx.h"
 
 #define STACK_SIZE 20
@@ -135,8 +136,8 @@ void mos_qry_free_bitmap_exec_stack(const mos_t_qry_bmp_exec_stack* stack) {
     for (uint64_t i = 0; i < stack->stack_size; i++) {
         free(stack->exec_steps[i]);
     }
-    free(stack->exec_steps);
-    free(stack);
+    free((void*)stack->exec_steps);
+    free((void*)stack);
 }
 
 mos_t_qry_bmp_stack* mos_qry_create_bitmap_stack(const mos_t_qry_bmp_exec_stack* exec, uint64_t nBits) {
@@ -159,6 +160,7 @@ mos_t_qry_bmp_stack* mos_qry_create_bitmap_stack(const mos_t_qry_bmp_exec_stack*
     mos_t_qry_bmp** result_stack = malloc(stack_size * sizeof(mos_t_qry_bmp*));
     
     if (!result_stack) {
+        free(free_stack);
         free(stack);
         return NULL;
     }
@@ -171,11 +173,11 @@ mos_t_qry_bmp_stack* mos_qry_create_bitmap_stack(const mos_t_qry_bmp_exec_stack*
 
     //let teh free_stack point to bitmaps
     for (uint64_t i = 0; i < stack_size; i++) {
-        stack->free_stack[i] = _aligned_malloc(sizeof(mos_t_qry_bmp) + nWords * sizeof(uint64_t), 64);
+        mos_os_mem_alloc_aligned((void**)&stack->free_stack[i], sizeof(mos_t_qry_bmp) + nWords * sizeof(uint64_t), 64);
         //if there is a single allocation failure, we free everything
         if(!stack->free_stack[i]) {
             for (uint64_t j = 0; j < i; j++) {
-                _aligned_free(stack->free_stack[j]);
+                mos_os_mem_free_aligned(stack->free_stack[j]);
             }
             free(stack->free_stack);
             free(stack);
@@ -195,11 +197,11 @@ mos_t_qry_bmp_stack* mos_qry_create_bitmap_stack(const mos_t_qry_bmp_exec_stack*
 void mos_qry_free_bitmap_stack(mos_t_qry_bmp_stack* stack) {
     for (uint64_t i = 0; i < stack->stack_size; i++) {
         if (stack->free_stack[i] != NULL) {
-            _aligned_free(stack->free_stack[i]);
+            mos_os_mem_free_aligned(stack->free_stack[i]);
             stack->free_stack[i] = NULL; // prevent double-free
         }
         if (stack->result_stack[i] != NULL) {
-            _aligned_free(stack->result_stack[i]);
+            mos_os_mem_free_aligned(stack->result_stack[i]);
             stack->result_stack[i] = NULL; // prevent double-free
         }
     }
@@ -341,7 +343,8 @@ mos_t_qry_bmp* mos_qry_execute(const mos_t_qry_bmp_exec_stack* query_exec, mos_t
 
 mos_t_qry_bmp* mos_qry_bitmap_clone(mos_t_qry_bmp* bm) {
     uint64_t bm_size = sizeof(mos_t_qry_bmp) + bm->nWords * sizeof(uint64_t);
-    mos_t_qry_bmp* bm_clone = _aligned_malloc(bm_size, 64);
+    mos_t_qry_bmp* bm_clone = NULL;
+    mos_os_mem_alloc_aligned((void**)&bm_clone, bm_size, 64);
 
     if(!bm_clone) {
         return NULL;
@@ -365,6 +368,7 @@ mos_t_qry_bmp* mos_qry_process_search(mos_t_storage* storage, mos_t_qry* query) 
 
     mos_qry_free_bitmap_exec_stack(exec_stack);
     mos_qry_free_bitmap_stack(bitmap_stack);
+    free(result);
 
     return result_clone;
 }
@@ -385,7 +389,7 @@ uint64_t mos_qry_bmp_count_ones(mos_t_qry_bmp* bm) {
  *  Make sure the buffer is of size int64_t * mos_qry_bmp_count_ones(bm).
  * @return row_ids count
  */
-uint64_t mos_qry_bmp_get_row_ids(mos_t_qry_bmp* bm, int64_t* row_ids) {
+uint64_t mos_qry_bmp_get_row_ids(const mos_t_qry_bmp* bm, int64_t* row_ids) {
     uint64_t ones_count = 0;
     for (size_t i = 0; i < bm->nWords; i++) {
         uint64_t word = bm->data[i];

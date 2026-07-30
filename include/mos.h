@@ -42,13 +42,6 @@ typedef struct mos_t_idx {
 } mos_t_idx;
 #pragma pack(pop)
 
-#pragma pack(push, 1)
-typedef struct mos_t_string {
-    char* str;
-    uint32_t str_len;
-} mos_t_string;
-#pragma pack(pop)
-
 typedef struct mos_t_config {
     uint64_t max_records;
     mos_t_attr_info* attributes;

@@ -29,6 +29,9 @@ LIB_TARGET = build/libmos.a
 TEST_SRCS = $(wildcard $(TEST_DIR)/mos_test_*.c)
 TEST_BINS = $(patsubst $(TEST_DIR)/%.c, $(TEST_DIR)/%, $(TEST_SRCS))
 
+FUZZY_SRCS = $(wildcard $(TEST_DIR)/mos_fuzzy_*.c)
+FUZZY_BINS = $(patsubst $(TEST_DIR)/mos_fuzzy_%.c, $(TEST_DIR)/mos_fuzzy_%, $(FUZZY_SRCS))
+
 # Default rule
 dev_build: $(TARGET)
 
@@ -66,13 +69,35 @@ test: $(LIB_OBJS) $(TEST_BINS)
 	@echo "ALL TEST FILES EXECUTED"
 	@echo "---------------------------------------"
 
-$(TEST_DIR)/%: $(TEST_DIR)/%.c $(LIB_OBJS) tests/unity.c
+$(TEST_DIR)/mos_test_%: $(TEST_DIR)/mos_test_%.c $(LIB_OBJS) tests/unity.c
+	$(CC) $(CFLAGS_TEST) $^ -o $@
+
+# Rule to build and run fuzzy tests
+# This compiles each .c file starting with mos_fuzzy in /tests into its own executable
+fuzzy: SANITIZERS = -fsanitize=fuzzer,address,undefined
+fuzzy: CFLAGS_TEST += $(SANITIZERS)
+fuzzy: $(LIB_OBJS) $(FUZZY_BINS)
+	@echo "---------------------------------------"
+	@echo "STARTING ALL FUZZY TESTS"
+	@echo "---------------------------------------"
+	@for test in $(FUZZY_BINS); do \
+		echo "Running $$test..."; \
+		./$$test; \
+		echo ""; \
+	done
+	@echo "---------------------------------------"
+	@echo "ALL FUZZY TEST FILES EXECUTED"
+	@echo "---------------------------------------"
+
+$(TEST_DIR)/mos_fuzzy_%: $(TEST_DIR)/mos_fuzzy_%.c $(LIB_OBJS)
 	$(CC) $(CFLAGS_TEST) $^ -o $@
 
 clean:
 	rm -rf $(OBJ_DIR) $(TARGET)
 	rm -f *.db
 	rm -f ./tests/*.db
+	rm -f $(TEST_BINS)
+	rm -f $(FUZZY_BINS)
 	rm -f ./tests/*.exe
 
 debug: SANITIZERS = -fsanitize=address,undefined
@@ -80,4 +105,4 @@ debug: CFLAGS += $(SANITIZERS)
 debug: CFLAGS_TEST += $(SANITIZERS)
 debug: $(LIB_OBJS) $(TEST_BINS)
 
-.PHONY: dev_build clean test debug lib
+.PHONY: dev_build clean test fuzzy debug lib

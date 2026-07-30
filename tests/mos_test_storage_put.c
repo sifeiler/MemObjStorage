@@ -7,6 +7,7 @@
 #include "../include/mos_internal.h"
 #include "../include/mos_idx_hmap.h"
 #include "../include/mos_idx.h"
+#include "../include/mos_utils.h"
 
 typedef struct {
     uint64_t id;
@@ -22,6 +23,12 @@ typedef struct {
 } CreateTestConfig;
 
 static CreateTestConfig test_config = {0};
+
+static TestEntry* result1;
+static TestEntry* result2;
+static TestEntry* result3;
+static TestEntry* result4;
+static void* mmap_ptr;
 
 void setUp(void) {
     mos_t_attr_info id = {
@@ -58,9 +65,34 @@ void setUp(void) {
     };
     test_config.indexes[0] = id_idx;
     test_config.indexes[1] = prop1_idx;
+
+    result1 = NULL;
+    result2 = NULL;
+    result3 = NULL;
+    result4 = NULL;
+    mmap_ptr = NULL;
 }
 
 void tearDown(void) {
+    if(result1) {
+        free(result1);
+    }
+
+    if(result2) {
+        free(result2);
+    }
+
+    if(result3) {
+        free(result3);
+    }
+
+    if(result4) {
+        free(result4);
+    }
+
+    if(mmap_ptr) {
+        free(mmap_ptr);
+    }
 }
 
 mos_t_storage setup_test_storage(void* memory, mos_t_header* h) {
@@ -80,6 +112,7 @@ mos_t_storage setup_test_storage(void* memory, mos_t_header* h) {
     storage.entries = (mos_t_record*)(base + h->layout.offset_records);
     storage.valid_bitmap = (mos_t_qry_bmp*)(base + h->layout.offset_valid_bitmap);
     storage.ready_bitmap = (mos_t_qry_bmp*)(base + h->layout.offset_ready_bitmap);
+    storage.string_silo_base = (void*)(base + h->layout.offset_string_silo);
 
     for (int i = 0; i < h->index_count; i++) {
         uint8_t* idx_page = ((uint8_t*)storage.index_data) + (i * 4096);
@@ -96,9 +129,10 @@ void test_mos_storage_put__put_record(void) {
     uint64_t file_size = 40960;
     uint64_t offset_records = 20480;
     uint64_t offset_id_idx = 24576;
-    uint64_t offset_prop1_idx = 24576 + 4096;
+    uint64_t offset_prop1_idx = offset_id_idx + 4096;
+    uint64_t offset_string_silo = offset_prop1_idx + 4096;
 
-    void* mmap_ptr = malloc(file_size);
+    mmap_ptr = malloc(file_size);
     memset(mmap_ptr, 0, file_size);
 
     mos_t_header header = {
@@ -122,13 +156,18 @@ void test_mos_storage_put__put_record(void) {
             .offset_ready_bitmap = 16384,
             .offset_records = offset_records,
             .offset_index_data = offset_id_idx,
+            .offset_string_silo = offset_string_silo,
             .file_size = file_size
         },
         .state = {
-            .current_string_offset = 0,
             .last_deleted_row_id = MOS_NULL_OFFSET,
-            .next_free_row_id = 0,
-            .last_deleted_string = {
+            .next_free_row_id = 0
+        },
+        .string_silo = {
+            .base_offset = offset_string_silo,
+            .current_offset = 0,
+            .size = 4096,
+            .last_deleted = {
                 .str_offset = MOS_NULL_OFFSET
             }
         }
@@ -143,16 +182,13 @@ void test_mos_storage_put__put_record(void) {
     uint64_t id1 = 1;
     mos_storage_put(&storage, id1, &entry);
 
-    TestEntry* result = (TestEntry*)mos_storage_get(&storage, id1); // Get first slot
+    result1 = (TestEntry*)mos_storage_get(&storage, id1); // Get first slot
     
     //Assert
-    TEST_ASSERT_EQUAL_INT64(1, result->id);
-    TEST_ASSERT_EQUAL_INT64(2, result->prop1);
-    TEST_ASSERT_EQUAL_STRING_LEN("entry1", result->prop2.str, result->prop2.str_len);
-    TEST_ASSERT_EQUAL_INT(6, result->prop2.str_len);
-
-    free(result);
-    free(mmap_ptr);
+    TEST_ASSERT_EQUAL_INT64(1, result1->id);
+    TEST_ASSERT_EQUAL_INT64(2, result1->prop1);
+    TEST_ASSERT_EQUAL_STRING_LEN("entry1", result1->prop2.str, result1->prop2.str_len);
+    TEST_ASSERT_EQUAL_INT(6, result1->prop2.str_len);
 }
 
 void test_mos_storage_put__put_records(void) {
@@ -160,9 +196,10 @@ void test_mos_storage_put__put_records(void) {
     uint64_t file_size = 40960;
     uint64_t offset_records = 20480;
     uint64_t offset_id_idx = 24576;
-    uint64_t offset_prop1_idx = 24576 + 4096;
+    uint64_t offset_prop1_idx = offset_id_idx + 4096;
+    uint64_t offset_string_silo = offset_prop1_idx + 4096;
 
-    void* mmap_ptr = malloc(file_size);
+    mmap_ptr = malloc(file_size);
     memset(mmap_ptr, 0, file_size);
 
     mos_t_header header = {
@@ -189,10 +226,14 @@ void test_mos_storage_put__put_records(void) {
             .file_size = file_size
         },
         .state = {
-            .current_string_offset = 0,
             .last_deleted_row_id = MOS_NULL_OFFSET,
-            .next_free_row_id = 0,
-            .last_deleted_string = {
+            .next_free_row_id = 0
+        },
+        .string_silo = {
+            .base_offset = offset_string_silo,
+            .current_offset = 0,
+            .size = 4096,
+            .last_deleted = {
                 .str_offset = MOS_NULL_OFFSET
             }
         }
@@ -212,23 +253,19 @@ void test_mos_storage_put__put_records(void) {
     mos_storage_put(&storage, id1, &entry);
     mos_storage_put(&storage, id11, &entry2);
 
-    TestEntry* result_entry1 = (TestEntry*)mos_storage_get(&storage, id1);
-    TestEntry* result_entry2 = (TestEntry*)mos_storage_get(&storage, id11);
+    result1 = (TestEntry*)mos_storage_get(&storage, id1);
+    result2 = (TestEntry*)mos_storage_get(&storage, id11);
 
     //Assert
-    TEST_ASSERT_EQUAL_INT64(1, result_entry1->id);
-    TEST_ASSERT_EQUAL_INT64(2, result_entry1->prop1);
-    TEST_ASSERT_EQUAL_STRING_LEN("entry1", result_entry1->prop2.str, result_entry1->prop2.str_len);
-    TEST_ASSERT_EQUAL_INT(6, result_entry1->prop2.str_len);
+    TEST_ASSERT_EQUAL_INT64(1, result1->id);
+    TEST_ASSERT_EQUAL_INT64(2, result1->prop1);
+    TEST_ASSERT_EQUAL_STRING_LEN("entry1", result1->prop2.str, result1->prop2.str_len);
+    TEST_ASSERT_EQUAL_INT(6, result1->prop2.str_len);
 
-    TEST_ASSERT_EQUAL_INT64(11, result_entry2->id);
-    TEST_ASSERT_EQUAL_INT64(20, result_entry2->prop1);
-    TEST_ASSERT_EQUAL_STRING_LEN("entry11", result_entry2->prop2.str, result_entry2->prop2.str_len);
-    TEST_ASSERT_EQUAL_INT(7, result_entry2->prop2.str_len);
-
-    free(result_entry1);
-    free(result_entry2);
-    free(mmap_ptr);
+    TEST_ASSERT_EQUAL_INT64(11, result2->id);
+    TEST_ASSERT_EQUAL_INT64(20, result2->prop1);
+    TEST_ASSERT_EQUAL_STRING_LEN("entry11", result2->prop2.str, result2->prop2.str_len);
+    TEST_ASSERT_EQUAL_INT(7, result2->prop2.str_len);
 }
 
 void print_record(TestEntry* entry) {

@@ -1,4 +1,5 @@
 #include "../include/mos.h"
+#include "../include/mos_string.h"
 #include <stdio.h>
 #include <inttypes.h>
 #include <string.h>

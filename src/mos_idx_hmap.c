@@ -40,7 +40,7 @@ __uint128_t mos_idx_murmur_hash_3_128(const uint8_t* data, const uint64_t seed, 
         hash1 = mos_idx_rotl64(hash2, 31); hash2 += hash1; hash2 = hash2 * 5 + 0x38495ab5;
     }
 
-    uint8_t* tail = data + (n * 16);
+    const uint8_t* tail = data + (n * 16);
     
     uint64_t k1 = 0;
     uint64_t k2 = 0;
@@ -167,7 +167,6 @@ int64_t mos_idx_hmap_find_row_id(const mos_t_idx_data* idx_data, const uint8_t* 
     mos_t_idx_hmap* index = (mos_t_idx_hmap*)idx_data->index_payload;
     mos_t_idx_hmap_header index_header = index->index_header;
     uint64_t table_size = index_header.table_size;
-    uint64_t* index_values = index->data;
     uint64_t* index_verifiers = index->data + table_size;
 
     __uint128_t hash = mos_idx_murmur_hash_3_128(key, MOS_IDX_MURMUR3_SEED, key_byte_len);
@@ -214,7 +213,7 @@ void mos_idx_hmap_remove(const mos_t_idx_data* idx_data, const uint8_t* key, con
     int64_t i = mos_idx_hmap_find_row_id(idx_data, key, key_byte_len);
 
     if(i == VALUE_NOT_FOUND) {
-        printf("Key is not within hash_map. Nothing to remove.");
+        printf("Key is not within hashmap. Nothing to remove.");
         return;
     }
 

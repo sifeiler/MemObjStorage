@@ -80,7 +80,7 @@ void test_mos_idx_hmap_size(void) {
     uint64_t item_count = 100;
 
     //Act
-    uint64_t actual_index_size = mos_idx_hmap_size(item_count);
+    uint64_t actual_index_size = mos_idx_hmap_size(item_count, NULL);
 
     //Assert
     TEST_ASSERT_EQUAL(8192, actual_index_size);

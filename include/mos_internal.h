@@ -25,7 +25,7 @@ static const uint8_t TYPE_SIZES[] = {
     [MOS_ATTR_TYPE_UINT64] = sizeof(uint64_t),
     [MOS_ATTR_TYPE_TIMESTAMP] = sizeof(uint64_t),
     //length of StringDescriptor.
-    //It's not the length of the string but a 8 byte offset in the silo + 4 byte size
+    //It's not the length of the string but 8 bytes for silo offset + 4 bytes for size
     [MOS_ATTR_TYPE_STRING] = 12
 };
 
@@ -123,12 +123,21 @@ typedef enum MOS_QRY_OPERATOR {
 #define MOS_QRY_LOGICAL_OP (MOS_QRY_OP_OR | MOS_QRY_OP_AND | MOS_QRY_OP_NOT)
 #define MOS_QRY_RELATIONAL_OP (MOS_QRY_OP_EQ | MOS_QRY_OP_GT | MOS_QRY_OP_LT | MOS_QRY_OP_SIMILAR)
 
+typedef struct mos_t_attr_value_vector {
+    uint16_t ef;     // Must be >= k, the number of neighbors requested. Higher ef = better recall, slower search.
+    uint64_t top_k;         // Return at most k results,
+    float threshold;        // but only results with similarity >= threshold
+    uint64_t vector_dim;    // depends on embedding (used model)
+    float* vector_val;
+} mos_t_attr_value_vector;
+
 typedef struct mos_t_attr_value {
     MOS_ATTR_TYPE type;
     uint64_t byte_length;
     union {
         uint64_t int_val;
         char* char_val;
+        mos_t_attr_value_vector vector_val;
     };
 } mos_t_attr_value;
 

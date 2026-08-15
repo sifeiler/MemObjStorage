@@ -1,0 +1,764 @@
+#include <stdint.h>
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdlib.h>
+#include <math.h>
+#include <assert.h>
+
+#include "../include/mos_idx_hnsw.h"
+#include "../include/mos_idx.h"
+#include "../include/mos_internal.h"
+#include "../include/mos_utils.h"
+#include "../include/mos_types_fwd.h"
+#include "../include/mos_math.h"
+
+typedef struct mos_t_idx_hnsw_data_ptrs {
+    float* vectors;
+    mos_t_idx_hnsw_graph_l0_node* l0_nodes;
+    uint8_t* upper_layers_arena;
+} mos_t_idx_hnsw_data_ptrs;
+
+typedef struct mos_t_idx_hnsw_heap_element {
+    float value;
+    uint64_t node_id;
+} mos_t_idx_hnsw_heap_element;
+
+typedef struct mos_t_idx_hnsw_min_heap {
+    mos_t_idx_hnsw_heap_element elements[MOS_IDX_HNSW_MAX_EF_CONSTRUCTION];
+    uint16_t element_count;
+} mos_t_idx_hnsw_min_heap;
+
+//TODO: check if this is the best option to store the reusable visited-bitmap for search/insert
+static _Thread_local uint64_t* visited_bitset = NULL;
+static _Thread_local uint64_t  visited_bitset_capacity = 0;  // in bits, i.e. node capacity it was sized for
+
+static void mos_idx_hnsw_ensure_visited_bitset(uint64_t node_capacity) {
+    if (visited_bitset_capacity < node_capacity) {
+        free(visited_bitset);  // safe no-op if NULL
+        uint64_t words = (node_capacity + 63) / 64;
+        visited_bitset = calloc(words, sizeof(uint64_t));  //pre-zeroed
+        visited_bitset_capacity = node_capacity;
+    } else {
+        // reuse existing buffer, just clear the portion actually in use
+        memset(visited_bitset, 0, ((node_capacity + 63) / 64) * sizeof(uint64_t));
+    }
+}
+
+static bool mos_idx_hnsw_node_visited(uint64_t node_id) {
+    return (visited_bitset[node_id / 64] >> (node_id % 64)) & 1ULL;
+}
+
+static void mos_idx_hnsw_set_node_visited(uint64_t node_id) {
+    uint64_t word = node_id / 64;
+    visited_bitset[word] |= (1ULL << (node_id % 64));
+}
+
+void mos_idx_hnsw_min_heap_push(mos_t_idx_hnsw_min_heap* heap, uint64_t node_id, float value) {
+    if(heap->element_count >= MOS_IDX_HNSW_MAX_EF_CONSTRUCTION) {
+        //heap full
+        return;
+    }
+
+    mos_t_idx_hnsw_heap_element* elements = heap->elements;
+
+    elements[heap->element_count].node_id = node_id;
+    elements[heap->element_count].value = value;
+    heap->element_count++;
+    
+    uint16_t i = heap->element_count - 1;
+    while(i > 0 && elements[(i-1) / 2].value > elements[i].value) {
+        mos_t_idx_hnsw_heap_element temp = elements[i];
+        elements[i] = elements[(i-1) / 2];
+        elements[(i-1) / 2] = temp;
+
+        i = (i-1) / 2;
+    }
+}
+
+int mos_idx_hnsw_min_heap_pop(mos_t_idx_hnsw_min_heap* heap, mos_t_idx_hnsw_heap_element* element_out) {
+    if(heap->element_count == 0) {
+        element_out = NULL;
+        return -1;
+    }
+
+    mos_t_idx_hnsw_heap_element* elements = heap->elements;
+
+    uint16_t i = 0;
+    *element_out = elements[i];
+    elements[i] = elements[heap->element_count - 1];
+    
+    while(1) {
+        uint16_t left_child_index = 2 * i + 1;
+        uint16_t right_child_index = 2 * i + 2;
+
+        uint16_t smallest = i;
+
+        if(left_child_index < heap->element_count && elements[left_child_index].value < elements[smallest].value) {
+            smallest = left_child_index;
+        }
+        if(right_child_index < heap->element_count && elements[right_child_index].value < elements[smallest].value) {
+            smallest = right_child_index;
+        }
+
+        if(smallest != i) {
+            mos_t_idx_hnsw_heap_element temp = elements[smallest];
+            elements[smallest] = elements[i];
+            elements[i] = temp;
+            i = smallest;
+        } else {
+            break;
+        }
+    }
+    return 0;
+}
+
+/**
+ * Pops from the min heap and fills elements_out back to front.
+ * This results in a sorted array of element ids ending with the smallest and starting with the biggest.
+ * 
+ * @param min_heap the heap to pop values from
+ * @param elements_out the result output parameter. Required to be of size `min_heap->element_count`
+ */
+void mos_idx_hnsw_sort_min_heap_reversed(
+    mos_t_idx_hnsw_min_heap* min_heap, 
+    uint64_t* elements_out
+) {
+    mos_t_idx_hnsw_heap_element element;
+    uint16_t element_pos = min_heap->element_count - 1;
+    while (mos_idx_hnsw_min_heap_pop(min_heap, &element) == 0) {
+        elements_out[element_pos] = element.node_id;
+        element_pos--;
+
+        if(element_pos == 0) {
+            break;
+        }
+    }
+}
+
+// ---- l0 node accessor ----
+// l0 nodes are stored as fixed-stride records (stride cached in header, since the
+// struct ends in a FAM and sizeof() can't be trusted). Never index this as a plain array.
+static inline mos_t_idx_hnsw_graph_l0_node* mos_idx_hnsw_l0_node_at(
+    mos_t_idx_hnsw_data_ptrs* ptrs,
+    uint64_t node_id,
+    uint64_t l0_node_stride
+) {
+    uint8_t* base = (uint8_t*)ptrs->l0_nodes;
+    return (mos_t_idx_hnsw_graph_l0_node*)(base + node_id * l0_node_stride);
+}
+
+// ---- upper-layer arena chunk accessor ----
+// Given a node's arena_offset (start of its upper layer block) and a target layer,
+// the function returns a live pointer to that layer's chunk.
+// Byte arithmetic only -- never add integers directly to a typed chunk pointer,
+// since the compiler would scale by sizeof(chunk), which is unreliable for a FAM type.
+// The node's first chunk is layer 1.
+static inline mos_t_idx_arena_chunk* mos_idx_hnsw_arena_chunk_at(
+    mos_t_idx_hnsw_data_ptrs* ptrs,
+    uint64_t node_arena_offset,
+    uint8_t layer,
+    uint64_t arena_chunk_stride
+) {
+    uint8_t* base = (uint8_t*)ptrs->upper_layers_arena;
+    uint64_t byte_offset = node_arena_offset + (uint64_t)(layer - 1) * arena_chunk_stride;
+    return (mos_t_idx_arena_chunk*)(base + byte_offset);
+}
+
+// ---- vector accessor ----
+static inline float* mos_idx_hnsw_vector_at(
+    mos_t_idx_hnsw_data_ptrs* ptrs,
+    uint64_t node_id,
+    uint16_t vector_dim
+) {
+    return ptrs->vectors + node_id * (uint64_t)vector_dim;
+}
+
+//In case this index will support multithreaded reads later, do not use rand() as threads will share similar randomization state.
+double mos_idx_hnsw_rand_0_1() {
+    return (double)rand() / ((double)RAND_MAX + 1.0);
+}
+
+uint8_t mos_idx_hnsw_max_layer(float mL) {
+    double rand_0_1 = mos_idx_hnsw_rand_0_1();
+    //Making sure rand_0_1 > 0 to avoid undefined ln() behaviour later.
+    if(rand_0_1 <= 0) {
+        // -1 because layer 0 is the first layer
+        return MOS_IDX_HNSW_MAX_LAYERS - 1;
+    }
+    //the smaler rand_0_1, the higher max_layer.
+    return floor(-ln(rand_0_1) * mL);
+}
+
+uint64_t mos_idx_hnsw_upper_layer_arena__layer_chunk_size_per_node(uint32_t m) {
+    //the node id per neighbor (m * 8 bytes) + 2 bytes for the current neighbors count
+    return m * sizeof(uint64_t) + sizeof(uint16_t);
+}
+
+mos_t_idx_hnsw_data_ptrs mos_idx_hnsw_get_data_ptrs(mos_t_idx_hnsw* index) {
+    mos_t_idx_hnsw_data_ptrs ptrs;
+    ptrs.vectors = index->data;
+    ptrs.l0_nodes = index->data + index->index_header.l0_nodes_offset;
+    ptrs.upper_layers_arena = index->data + index->index_header.upper_layers_arena_offset;
+    return ptrs;
+}
+
+/**
+ * upper layer arena structure:
+ *   
+ * [arena offset node 0][layer 1: [neighbors_count (max m):neighbors[m]]][layer 2: [neighbors_count (max m):neighbors[m]]][...]
+ * [arena offset node 1][layer 1: [neighbors_count (max m):neighbors[m]]][layer 2: [neighbors_count (max m):neighbors[m]]][...]
+ * ...
+ */
+uint64_t mos_idx_hnsw_upper_layer_arena_size(const uint64_t max_node_count, mos_t_idx_hnsw_graph_config* graph_config) {
+    uint32_t m = graph_config->m;
+    assert(m >= 2 && "M must be at least 2 to avoid infinite/degenerate layer growth");
+    
+    uint8_t current_layer = 1;
+    uint64_t arena_byte_size = 0;
+    uint64_t layer_node_count = 0;
+    uint64_t layer_chunk_size_per_node = mos_idx_hnsw_upper_layer_arena__layer_chunk_size_per_node(m);
+    while ((layer_node_count = round(max_node_count / (pow(m, current_layer)))) > 0) {
+        arena_byte_size += layer_chunk_size_per_node * layer_node_count * MOS_IDX_HNSW_LAYER_MARGIN_MULTIPLICATOR;
+        current_layer++;
+    }
+
+    uint8_t start_layer = current_layer;
+    //3 layers margin
+    for (; current_layer < start_layer + 3; current_layer++) {
+        arena_byte_size += MOS_IDX_HNSW_LAYER_MARGIN_MULTIPLICATOR * layer_chunk_size_per_node;
+    }
+    
+    return arena_byte_size;
+}
+
+uint64_t mos_idx_hnsw_size(const uint64_t max_node_count, mos_t_idx* idx) {
+    assert(idx->type == MOS_IDX_HNSW);
+    mos_t_idx_params_hnsw idx_params_hnsw = idx->params.hnsw;
+    mos_t_idx_hnsw_graph_config graph_config = idx_params_hnsw.graph_config;
+
+    uint64_t index_size = sizeof(mos_t_idx_hnsw_header);
+
+    //vectors
+    index_size += sizeof(float) * idx_params_hnsw.vector_dim * max_node_count;
+    
+    //layer 0 nodes
+    index_size += sizeof(mos_t_idx_hnsw_graph_l0_node) * max_node_count;    //on layer 0, one node per vector
+    index_size += sizeof(uint64_t) * graph_config.m_max0;                   //neighbors
+
+    //graph payload upper layers arena
+    index_size += mos_idx_hnsw_upper_layer_arena_size(max_node_count, &graph_config);
+
+    //internal_id -> external_id mapping
+    index_size += sizeof(uint64_t) * max_node_count;
+
+    return MOS_ALIGN_UP(index_size, MOS_PAGE_SIZE);     //TODO: Do not align up here. Alignig is not part of the hnsw but of core.
+}
+
+void mos_idx_hnsw_init(const uint64_t item_count, mos_t_idx* idx, mos_t_idx_data* idx_data) {
+    assert(idx_data->index.type == MOS_IDX_HNSW);
+    //TODO: set upper_layers_arena_chunk_size
+}
+
+int8_t mos_idx_hnsw_get_neighbors(
+    mos_t_idx_hnsw* index,
+    mos_t_idx_hnsw_data_ptrs* ptrs,
+    uint64_t node_id,
+    uint8_t layer,
+    uint64_t layer_chunk_size,
+    uint64_t** neighbors_out,
+    uint16_t neighbors_out_capacity,
+    uint16_t** neighbors_out_count_ptr
+) {
+    mos_t_idx_hnsw_graph_l0_node* node = mos_idx_hnsw_l0_node_at(ptrs, node_id, index->index_header.l0_node_stride);
+
+    if(layer > node->max_layer) {
+        return MOS_IDX_HNSW_NOT_FOUND;
+    }
+
+    if(layer == 0) {
+        *neighbors_out = node->neighbors;
+        *neighbors_out_count_ptr = &node->neighbors_count;
+        return MOS_IDX_HNSW_OK;
+    }
+
+    mos_idx_hnsw_arena_chunk_at(ptrs, node->arena_offset, layer, layer_chunk_size);
+
+    mos_t_idx_arena_chunk* node_arena_chunk = mos_idx_hnsw_arena_chunk_at(ptrs, node->arena_offset, layer, layer_chunk_size);
+
+    *neighbors_out = node_arena_chunk->neighbors;
+    *neighbors_out_count_ptr = &node_arena_chunk->neighbors_count;
+
+    return MOS_IDX_HNSW_OK;
+}
+
+// Returns the single closest node found.
+uint64_t mos_idx_hnsw_greedy_search(
+    mos_t_idx_hnsw* hnsw,
+    mos_t_idx_hnsw_data_ptrs* ptrs,
+    const float* query_vector,
+    uint64_t start_node_id,
+    uint8_t layer
+) {
+    mos_t_idx_hnsw_graph_config graph_config = hnsw->index_header.graph_config;
+    float* start_node_vector = mos_idx_hnsw_vector_at(ptrs, start_node_id, hnsw->index_header.vector_dim);
+    float best_distance = mos_math_calc_distance(query_vector, start_node_vector, hnsw->index_header.vector_dim, hnsw->index_header.vector_metric);
+
+    uint64_t closest_node_id = start_node_id;
+
+    while(1) {
+        uint64_t neighbors[graph_config.m];
+        uint16_t* neighbors_count;
+        mos_idx_hnsw_get_neighbors(hnsw, ptrs, closest_node_id, layer, hnsw->index_header.upper_layers_arena_chunk_stride, &neighbors, graph_config.m, &neighbors_count);
+
+        uint64_t prev_closest_node_id = closest_node_id;
+        for(int i = 0; i < *neighbors_count; i++) {
+            uint64_t neighbor_node_id = neighbors[i];
+            float* neighbor_node_vector = mos_idx_hnsw_vector_at(ptrs, neighbor_node_id, hnsw->index_header.vector_dim);
+
+            uint64_t new_pot_best_distance = mos_math_calc_distance(query_vector, neighbor_node_vector, hnsw->index_header.vector_dim, hnsw->index_header.vector_metric);
+            if(new_pot_best_distance < best_distance) {
+                //found new best
+                best_distance = new_pot_best_distance;
+                closest_node_id = neighbor_node_id;
+            }
+        }
+
+        if(prev_closest_node_id == closest_node_id) {
+            //there was no closer neighbor. closest_node_id is closest node. greedy search done.
+            break;
+        }
+    }
+
+    return closest_node_id;
+}
+
+/**
+ * Runs ef-sized candidate search at target_layer.
+ * Finds a ef-sized set of nearest neighbors to query_vector. Result set is sorted ascending by vector distance.
+ * 
+ * @param hnsw
+ * @param ptrs pre-calculated pointers for easier access
+ * @param query_vector must have hnsw->header.vector_dim elements
+ * @param start_node_id node to begin the search from (usually the current entry point)
+ * @param target_layer layer to run the ef-sized candidate search at
+ * @param ef candidate list size (ef_construction at insert, ef at query time)
+ * @param neighbors_out caller-owned buffer, must hold at least ef entries
+ * @param neighbors_out_capacity size of neighbors_out, for bounds safety
+ * @param neighbors_out_count actual number of results written to neighbors_out
+ * 
+ * @return status about the operations success
+ */
+mos_idx_t_hnsw_status mos_idx_hnsw_get_nearest_neighbors_ascending_by_distance(
+    mos_t_idx_hnsw* hnsw,
+    mos_t_idx_hnsw_data_ptrs* ptrs,
+    const float* query_vector,
+    uint64_t start_node_id,
+    uint8_t target_layer,
+    uint16_t ef,
+    uint64_t* neighbors_out,
+    uint16_t neighbors_out_capacity,
+    uint16_t* neighbors_out_count
+) {
+    mos_t_idx_hnsw_graph_config graph_config = hnsw->index_header.graph_config;
+
+    // candidates min-heap will store negative dot_products.
+    // The more likely two vectors, the smaller their negative dot-product.
+    mos_t_idx_hnsw_min_heap candidate_heap;
+
+    // result_heap stores positive dot_products.
+    // The smaller the dot_product, the dissimilar the vectors
+    mos_t_idx_hnsw_min_heap result_heap;
+
+    uint64_t curr_closest_node_id = start_node_id;
+    float* curr_closest_vector = mos_idx_hnsw_vector_at(ptrs, curr_closest_node_id, hnsw->index_header.vector_dim);
+    float curr_best_distance = mos_math_calc_distance(query_vector, curr_closest_vector, hnsw->index_header.vector_dim, hnsw->index_header.vector_metric);
+
+    mos_idx_hnsw_min_heap_push(&candidate_heap, start_node_id, -curr_best_distance);
+    mos_idx_hnsw_min_heap_push(&result_heap, start_node_id, curr_best_distance);
+
+    mos_idx_hnsw_ensure_visited_bitset(hnsw->index_header.node_capacity);
+    mos_t_idx_hnsw_heap_element c;
+    while(mos_idx_hnsw_min_heap_pop(&candidate_heap, &c) == 0) {
+        float* c_vector = mos_idx_hnsw_vector_at(ptrs, c.node_id, hnsw->index_header.vector_dim);
+        float new_pot_best_distance = mos_math_calc_distance(query_vector, c_vector, hnsw->index_header.vector_dim, hnsw->index_header.vector_metric);
+        
+        //have to negate it again as candidates are stored with neg. values to reuse min-heap...
+        float c_distance = -c.value;
+
+        if(result_heap.element_count == ef && c_distance >= result_heap.elements[0].value) {
+            break;
+        }
+
+        if(c_distance > result_heap.elements[0].value) {
+            mos_idx_hnsw_min_heap_push(&result_heap, c.node_id, c_distance);
+            continue;
+        } else {
+            //candidate is closer to query vector than the current worst result
+            mos_t_idx_hnsw_heap_element worse_result;
+            mos_idx_hnsw_min_heap_pop(&result_heap, &worse_result);
+            mos_idx_hnsw_min_heap_push(&result_heap, c.node_id, c_distance);
+        }
+
+        uint64_t neighbors[graph_config.m];
+        uint16_t* neighbors_count;
+        mos_idx_hnsw_get_neighbors(hnsw, ptrs, c.node_id, target_layer, hnsw->index_header.upper_layers_arena_chunk_stride, &neighbors, graph_config.m, &neighbors_count);
+
+        //add unvisited neighbors of current candidate
+        for(int i = 0; i < *neighbors_count; i++) {
+            uint64_t neighbor_node_id = neighbors[i];
+            if(!mos_idx_hnsw_node_visited(neighbor_node_id)) {
+                float* neighbor_vector = mos_idx_hnsw_vector_at(ptrs, neighbor_node_id, hnsw->index_header.vector_dim);
+                float neighbor_distance = mos_math_calc_distance(query_vector, neighbor_vector, hnsw->index_header.vector_dim, hnsw->index_header.vector_metric);
+                mos_idx_hnsw_min_heap_push(&candidate_heap, neighbor_node_id, neighbor_distance);
+                mos_idx_hnsw_set_node_visited(neighbor_node_id);
+            }
+        }
+    }
+
+    *neighbors_out_count = result_heap.element_count;
+    // write result heap to neighbors_out; sorted by value and asc, so closest neighbors first
+    mos_idx_hnsw_sort_min_heap_reversed(&result_heap, neighbors_out);
+}
+
+/**
+ * Iterates over candidates. If a candidate c1 at index 1 is closer to a candidate c0 at index 0, than it is to the query vector, c1 is discarded.
+ * Heuristics provide a well distributed graph. 
+ * For heuristics to work properly, the candidate set has to be sorted ascending by vector distance.
+ * 
+ * @param hnsw
+ * @param ptrs pre-calculated pointers for easier access
+ * @param query_vector must have hnsw->header.vector_dim elements
+ * @param candidates node to begin the search from (usually the current entry point)
+ * @param candidate_count layer to run the ef-sized candidate search at
+ * @param selected_out caller-owned buffer, must hold at least candidate_count entries
+ * @param selected_out_capacity size of selected_out, for bounds safety
+ * @param selected_out_count actual number of results written to selected_out
+ * @param discarded_out caller-owned buffer, must hold at least candidate_count entries
+ * @param discarded_out_capacity size of discarded_out, for bounds safety
+ * @param discarded_out_count actual number of results written to discarded_out
+ * 
+ * @return status about the operations success
+ */
+mos_idx_hnsw_select_neighbors_heuristic(
+    mos_t_idx_hnsw* hnsw,
+    mos_t_idx_hnsw_data_ptrs* ptrs,
+    float* query_vector, 
+    uint64_t* candidates, 
+    uint16_t candidate_count,
+    uint64_t* selected_out, uint16_t selected_out_capacity, uint16_t* selected_out_count,
+    uint64_t* discarded_out, uint16_t discarded_out_capacity, uint16_t* discarded_out_count
+) {
+    assert(selected_out_capacity >= candidate_count);
+    assert(discarded_out_capacity >= candidate_count);
+
+    *selected_out = 0;
+    *discarded_out = 0;
+
+    uint16_t selected_count = 0;
+    uint16_t discarded_count = 0;
+    uint64_t final_selected[selected_out_capacity];
+    uint64_t final_discarded[discarded_out_capacity];
+    for(uint16_t i = 0; i < candidate_count; i++) {
+        uint64_t c = candidates[i];
+        float* c_vector = mos_idx_hnsw_vector_at(ptrs, c, hnsw->index_header.vector_dim);
+        float c_q_distance = mos_math_calc_distance(c_vector, query_vector, hnsw->index_header.vector_dim, hnsw->index_header.vector_metric);
+        bool valid_candidate = true;
+        for (int j = 0; j < selected_count; j++) {
+            uint64_t selected_node_id = final_selected[j];
+            float* s_vector = mos_idx_hnsw_vector_at(ptrs, selected_node_id, hnsw->index_header.vector_dim);
+            float c_s_distance = mos_math_calc_distance(c_vector, s_vector, hnsw->index_header.vector_dim, hnsw->index_header.vector_metric);
+            if(c_s_distance < c_q_distance) {
+                valid_candidate = false;
+                break;
+            }
+        }
+        
+        if(valid_candidate) {
+            final_selected[selected_count++] = c;
+        } else {
+            final_discarded[discarded_count++] = c;
+        }
+    }
+
+    assert(selected_count + discarded_count == candidate_count);
+
+    *selected_out_count = selected_count;
+    *discarded_out_count = discarded_count;
+    
+    for (int i = 0; i < selected_count; i++) {
+        selected_out[i] = final_selected[i];
+    }
+    for (int i = 0; i < discarded_count; i++) {
+        discarded_out[i] = final_discarded[i];
+    }
+}
+
+/**
+ * Connects node_id to neighbors and vice versa.
+ * If a neighbors list is already full, heuristic search will be applied to neighbors_count + 1 (new neighbor) neighbors selecting best fitting neighbors.
+ * 
+ * @param index
+ * @param hnsw_ptrs
+ * @param node_id
+ * @param layer
+ * @param neighbors
+ * @param neighbors_count
+ */
+mos_idx_hnsw_connect_neighbors(
+    mos_t_idx_hnsw* index,
+    mos_t_idx_hnsw_data_ptrs* hnsw_ptrs,
+    uint64_t node_id,
+    uint8_t layer,
+    uint64_t* new_neighbors,
+    uint16_t new_neighbors_count
+) {
+    uint16_t m = layer == 0 ? index->index_header.graph_config.m_max0 : index->index_header.graph_config.m;
+
+    uint64_t current_neighbors[m];
+    uint16_t* current_neighbors_count;
+    mos_idx_hnsw_get_neighbors(index, hnsw_ptrs, node_id, layer, index->index_header.upper_layers_arena_chunk_stride, &current_neighbors, m, &current_neighbors_count);
+
+    uint64_t total_neighbors_count = *current_neighbors_count + new_neighbors_count;
+    //do the neighbors fit?
+    if(total_neighbors_count <= m) {
+        memcpy(&current_neighbors[*current_neighbors_count], new_neighbors, sizeof(uint64_t) * new_neighbors_count);
+    } else {
+        //new neighbors will not fit. Let heuristic search do the job.
+        uint64_t total_neighbors[total_neighbors_count];
+        memcpy(total_neighbors, current_neighbors, sizeof(uint64_t) * *current_neighbors_count);
+        memcpy(&total_neighbors[*current_neighbors_count], new_neighbors, sizeof(uint64_t) * new_neighbors_count);
+
+        float* node_vector = mos_idx_hnsw_vector_at(hnsw_ptrs, node_id, index->index_header.vector_dim);
+        uint16_t final_selected_neighbors_count;
+        uint64_t final_selected_neighbors[m];
+        uint16_t final_discarded_neighbors_count;
+        uint64_t final_discarded_neighbors[m];
+        mos_idx_hnsw_select_neighbors_heuristic(
+            index,
+            &hnsw_ptrs,
+            node_vector,
+            total_neighbors,
+            total_neighbors_count,
+            final_selected_neighbors,
+            m,
+            &final_selected_neighbors_count,
+            final_discarded_neighbors,
+            m,
+            &final_discarded_neighbors_count
+        );
+        memcpy(current_neighbors, final_selected_neighbors, sizeof(uint64_t) * final_selected_neighbors_count);
+        *current_neighbors_count = final_selected_neighbors_count;
+
+        //handle discarded
+        for (uint16_t i = 0; i < final_discarded_neighbors_count; i++) {
+            uint64_t discarded_node_id = final_discarded_neighbors[i];
+            uint16_t* current_discarded_neighbors_count;
+            uint64_t current_discarded_neighbors[m];
+            mos_idx_hnsw_get_neighbors(index, hnsw_ptrs, discarded_node_id, layer, index->index_header.upper_layers_arena_chunk_stride, &current_discarded_neighbors, m, &current_discarded_neighbors_count);
+            for(uint16_t j = 0; j < *current_discarded_neighbors_count; j++) {
+                if(current_discarded_neighbors[j] == node_id) {
+                    current_discarded_neighbors[j] = current_discarded_neighbors[*current_discarded_neighbors_count - 1];
+                    (*current_discarded_neighbors_count)--;
+                }
+            }
+        }
+
+        //handle selected
+        for(uint16_t i = 0; i < final_selected_neighbors_count; i++) {
+            uint64_t candidate = final_selected_neighbors[i];
+
+            bool is_newly_added = false;
+            for (uint16_t j = 0; j < new_neighbors_count; j++) {
+                if (candidate == new_neighbors[j]) {
+                    is_newly_added = true;
+                    break;   // found it, no need to keep scanning new_neighbors
+                }
+            }
+
+            if (is_newly_added) {
+                mos_idx_hnsw_connect_neighbors(index, hnsw_ptrs, candidate, layer, &node_id, 1);
+            }
+        }
+    }
+}
+
+int64_t mos_idx_hnsw_put(mos_t_idx_data* idx_data, const uint8_t* key, const size_t key_len, const uint64_t value) {
+    assert(idx_data->index.type == MOS_IDX_HNSW);
+
+    mos_t_idx_hnsw* index = idx_data->index_payload;
+    mos_t_idx_hnsw_header* index_header = &index->index_header;
+    
+    uint16_t dims = index_header->vector_dim;
+    assert(key_len == (size_t)dims * sizeof(float));
+    assert(index_header->node_count <= index_header->node_capacity);
+
+    if(index_header->node_count == index_header->node_capacity) {
+        mos_utils_report_error("HNSW index is full. Cannot put any more vectors.");
+        return MOS_IDX_HNSW_ERR_FULL_INDEX;
+    }
+
+    mos_t_idx_hnsw_graph_config graph_config = index_header->graph_config;
+
+    mos_t_idx_hnsw_data_ptrs hnsw_ptrs = mos_idx_hnsw_get_data_ptrs(&index);
+    uint64_t new_node_id = index_header->node_count;
+    uint64_t next_free_arena_offset = index_header->next_upper_layers_arena_offset;
+    
+    //at this point, there is room for another vector
+    float query_vector[dims];
+    memcpy(query_vector, key, key_len);
+
+    uint64_t current_entry_node_id;
+    uint64_t final_entry_node_id;
+    uint8_t active_layer;
+    uint8_t new_node_max_layer = mos_idx_hnsw_max_layer(graph_config.mL);
+    uint8_t final_max_layer;
+    
+    // Clear arena for new node.
+    // Neighbor counters for every upper layer of new node are set to 0!
+    uint64_t chunk_size = new_node_max_layer * index_header->upper_layers_arena_chunk_stride;
+    uint64_t new_node_arena_offset = next_free_arena_offset;
+    memset(hnsw_ptrs.upper_layers_arena + new_node_arena_offset, 0, chunk_size);
+    index_header->next_upper_layers_arena_offset += chunk_size;
+
+    //add new node to layer 0. Node is not connected to any other nodes yet.
+    mos_t_idx_hnsw_graph_l0_node* node = mos_idx_hnsw_l0_node_at(&hnsw_ptrs, new_node_id, index_header->l0_node_stride);
+    node->arena_offset = new_node_arena_offset;
+    node->max_layer = new_node_max_layer;
+    node->neighbors_count = 0;
+
+    memcpy(&hnsw_ptrs.vectors[new_node_id], query_vector, sizeof(float) * dims);
+    index_header->node_count++;
+
+    // Return early if this is the very first entry.
+    if(index_header->index_empty) {
+        assert(index_header->node_count == 0);
+        assert(index_header->current_max_layer == 0);
+        index_header->entry_node_id = new_node_id;
+        index_header->current_max_layer = new_node_max_layer;
+        index_header->index_empty = false;
+        return MOS_IDX_HNSW_OK;
+    }
+
+    assert(index_header->node_count > 0);
+    assert(index_header->current_max_layer >= 0);
+    
+    // First stage lookup: find best entry node for nearest neighbor search
+    if(new_node_max_layer < index_header->current_max_layer) {
+        current_entry_node_id = index_header->entry_node_id;
+        active_layer = index_header->current_max_layer;
+        final_entry_node_id = index_header->entry_node_id;
+        final_max_layer = index_header->current_max_layer;
+
+        // Iterate from current_max_layer down to new_node_max_layer + 1 and find nearest node to query_vector.
+        // This is a creedy search, so it does not consider a candidate list per layer but just the entry_node_ids neighbors.
+        // Start with entry_node_id at current_max_layer.
+        for(; active_layer > new_node_max_layer; active_layer--) {
+            current_entry_node_id = mos_idx_hnsw_greedy_search(index, &hnsw_ptrs, query_vector, current_entry_node_id, active_layer);
+        }
+    } else {
+        current_entry_node_id = index_header->entry_node_id;
+        active_layer = index_header->current_max_layer;
+        final_entry_node_id = new_node_id;
+        final_max_layer = new_node_max_layer;
+    }
+
+    // Second stage lookup: find nearest neighbors to query vector. Start at entry_node_id and active_layer.
+    // This is a candidate search down to and including layer 0.
+    for(; active_layer >= 0; active_layer--) {
+        uint64_t neighbors[graph_config.ef_construction];
+        uint16_t neighbors_count;
+        if(mos_idx_hnsw_get_nearest_neighbors_ascending_by_distance(
+            index,
+            &hnsw_ptrs,
+            query_vector,
+            current_entry_node_id,
+            active_layer,
+            graph_config.ef_construction,
+            neighbors,
+            graph_config.ef_construction,
+            &neighbors_count) == MOS_IDX_HNSW_OK)
+        {
+            //apply heuristics
+            uint64_t selected_neighbors[neighbors_count];
+            uint16_t selected_count;
+            uint64_t discarded_neighbors[neighbors_count];
+            uint16_t discarded_count;
+            mos_idx_hnsw_select_neighbors_heuristic(
+                index,
+                &hnsw_ptrs,
+                query_vector,
+                neighbors,
+                neighbors_count,
+                &selected_neighbors,
+                neighbors_count,
+                &selected_count,
+                &discarded_neighbors,
+                neighbors_count,
+                &discarded_count
+            );
+
+            if(selected_count > 0) {
+                //connect neighbors.
+                mos_idx_hnsw_connect_neighbors(index, &hnsw_ptrs, new_node_id, active_layer, selected_neighbors, selected_count);
+            }
+
+            current_entry_node_id = neighbors[0];
+        }
+
+        //active_layer is unsigned so break before infinite loop :)
+        if(active_layer == 0) {
+            break;
+        }
+    }
+
+    index_header->entry_node_id = final_entry_node_id;
+    index_header->current_max_layer = final_max_layer;
+
+    return 0;
+}
+
+int64_t mos_idx_hnsw_get(const mos_t_idx_data* idx_data, const uint8_t* key, const size_t key_len) {
+    assert(idx_data->index.type == MOS_IDX_HNSW);
+
+    return -1;
+}
+
+void mos_idx_hnsw_remove(const mos_t_idx_data* idx_data, const uint8_t* key, const size_t key_len) {
+    assert(idx_data->index.type == MOS_IDX_HNSW);
+
+}
+
+/**
+ * Searches the index data for vectors that match the query and sets a 1 in the bitmap for the matching vectors row_id.
+ */
+void mos_idx_hnsw_bitmap_search(const mos_t_idx_data* idx_data, mos_t_qry_bmp* bitmap, const mos_t_qry_attr_qry* attribute_query) {
+    assert(idx_data->index.type == MOS_IDX_HNSW);
+
+    mos_t_idx_hnsw* index = idx_data->index_payload;
+    mos_t_idx_hnsw_header* index_header = &index->index_header;
+    mos_t_attr_value_vector search_vector = attribute_query->value.vector_val;
+    uint16_t ef = search_vector.ef;
+    uint16_t k = search_vector.top_k;
+
+    uint16_t dims = index_header->vector_dim;
+    assert(search_vector.vector_dim == dims);
+    assert(strcmp(idx_data->index.attribute.name, attribute_query->attribute_name) == 0);
+
+    float query_vector[dims];
+    memcpy(query_vector, search_vector.vector_val, sizeof(float) * search_vector.vector_dim);
+    mos_t_idx_hnsw_data_ptrs hnsw_ptrs = mos_idx_hnsw_get_data_ptrs(&index);
+    uint64_t nearest_node = index_header->entry_node_id;
+    for(uint8_t i = index_header->current_max_layer; i > 0; i--) {
+        nearest_node = mos_idx_hnsw_greedy_search(index, &hnsw_ptrs, query_vector, nearest_node, i);
+    }
+
+    //ef based search on layer 0, starting with nearest_node
+    uint64_t nearest_neighbors[ef];
+    uint16_t nearest_neighbors_count;
+    mos_idx_hnsw_get_nearest_neighbors_ascending_by_distance(index, &hnsw_ptrs, query_vector, nearest_node, 0, ef, nearest_neighbors, ef, &nearest_neighbors_count);
+
+    //select top k
+    uint16_t result_count = k < nearest_neighbors_count ? k : nearest_neighbors_count;
+
+    //set bitmap values
+}

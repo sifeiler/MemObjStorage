@@ -2,7 +2,7 @@
 #define MOS_TYPES_H
 
 /* =========================================================================
-   index.h FORWARD DECLARATIONS
+   mos_idx.h, mos_idx_*.h FORWARD DECLARATIONS
    ========================================================================= */
 typedef enum MOS_IDX_TYPE MOS_IDX_TYPE;
 typedef struct mos_t_idx mos_t_idx;
@@ -11,6 +11,8 @@ typedef struct mos_t_idx_op mos_t_idx_op;
 
 typedef struct mos_t_idx_hmap_header mos_t_idx_hmap_header;
 typedef struct mos_t_idx_hmap mos_t_idx_hmap;
+
+typedef struct mos_t_idx_hnsw_graph_config mos_t_idx_hnsw_graph_config;
 
 /* =========================================================================
    mos.h FORWARD DECLARATIONS

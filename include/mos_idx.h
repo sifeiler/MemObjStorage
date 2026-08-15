@@ -5,6 +5,7 @@
 #include "mos_types_fwd.h"
 #include "mos.h"
 #include "mos_idx_hmap.h"
+#include "mos_idx_hnsw.h"
 
 /* =========================================================================
    1. CONSTANTS, MACROS, ENUMS
@@ -17,7 +18,7 @@
 #pragma pack(push, 1)
 typedef struct mos_t_idx_data {
    mos_t_idx index;
-   //the actual index: hash_map, b-tree, trie whatever
+   //the actual index: hash_map, hnsw, ...
    uint8_t index_payload[];
 } mos_t_idx_data;
 #pragma pack(pop)
@@ -39,6 +40,14 @@ static const mos_t_idx_ops MOS_IDX_OPS_REGISTRY[] = {
         .get = mos_idx_hmap_get,
         .bitmap_search = mos_idx_hmap_bitmap_search,
         .remove = mos_idx_hmap_remove
+    },
+    [MOS_IDX_HNSW] = {
+         .get_index_size = mos_idx_hnsw_size,
+         .init_index = mos_idx_hnsw_init,
+         .put = mos_idx_hnsw_put,
+         .get = mos_idx_hnsw_get,
+         .bitmap_search = mos_idx_hnsw_bitmap_search,
+         .remove = mos_idx_hnsw_remove
     }
 };
 

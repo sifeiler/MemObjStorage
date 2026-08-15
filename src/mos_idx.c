@@ -14,8 +14,9 @@ mos_t_idx_ops mos_idx_get_idx_ops(MOS_IDX_TYPE type) {
 
 int mos_idx_get_supported_index_query_ops(mos_t_idx* index) {
     switch(index->type) {
-        case MOS_IDX_HASH_MAP:  return MOS_QRY_OP_EQ;
-        default:        return 0;
+        case MOS_IDX_HASH_MAP: return MOS_QRY_OP_EQ;
+        case MOS_IDX_HNSW: return MOS_QRY_OP_SIMILAR;
+        default: return 0;
     }
 }
 

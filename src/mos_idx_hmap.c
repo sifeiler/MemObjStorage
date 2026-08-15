@@ -1,4 +1,5 @@
 #include <stddef.h>
+#include <stdint.h>
 
 #include "../include/mos_idx_hmap.h"
 #include "../include/mos_idx.h"
@@ -85,7 +86,7 @@ __uint128_t mos_idx_murmur_hash_3_128(const uint8_t* data, const uint64_t seed, 
 }
 
 /* Implementation of hash map index size. See hash_map_index.h for documentation. */
-uint64_t mos_idx_hmap_size(uint64_t item_count) {
+uint64_t mos_idx_hmap_size(uint64_t item_count, mos_t_idx* idx) {
     uint64_t index_data_size = sizeof(mos_t_idx_hmap_header);
     uint64_t item_size = sizeof(*((mos_t_idx_hmap*)0)->data);
     uint64_t table_size = mos_utils_next_pow_of_2(2 * item_count);
@@ -102,7 +103,7 @@ void mos_idx_hmap_init(uint64_t item_count, mos_t_idx* idx, mos_t_idx_data* idx_
    
     //alignment to next power of 2 is important for fast modulo operations (AND)
     uint64_t table_size = mos_utils_next_pow_of_2(2 * item_count);
-    idx->index_size = mos_idx_hmap_size(item_count);
+    idx->index_size = mos_idx_hmap_size(item_count, idx);
     idx_hash_map->index_header.table_size = table_size;
 
     //index values come right after the header
@@ -190,11 +191,11 @@ int64_t mos_idx_hmap_find_row_id(const mos_t_idx_data* idx_data, const uint8_t* 
     return VALUE_NOT_FOUND;
 }
 
-int64_t mos_idx_hmap_get(const mos_t_idx_data* idx_data, const uint8_t* key, const size_t key_byte_len) {
+int64_t mos_idx_hmap_get(const mos_t_idx_data* idx_data, const uint8_t* key, const size_t key_len) {
     mos_t_idx_hmap* index = (mos_t_idx_hmap*)idx_data->index_payload;
     uint64_t* index_values = index->data;
 
-    int64_t i = mos_idx_hmap_find_row_id(idx_data, key, key_byte_len);
+    int64_t i = mos_idx_hmap_find_row_id(idx_data, key, key_len);
 
     if(i == VALUE_NOT_FOUND) {
         return VALUE_NOT_FOUND;

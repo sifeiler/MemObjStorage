@@ -15,12 +15,15 @@
    CONSTANTS, MACROS, ENUMS
    ========================================================================= */
 
-typedef enum MOS_IDX_TYPE { MOS_IDX_HASH_MAP, MOS_IDX_TRIE } MOS_IDX_TYPE;
+typedef enum MOS_IDX_TYPE { MOS_IDX_HASH_MAP, MOS_IDX_HNSW } MOS_IDX_TYPE;
 
+//TODO: give integers to enum values and store integers anywhere the enum is used.
+// Otherwise it might get messy due to different compilers and mmapping.
 typedef enum MOS_ATTR_TYPE {
     MOS_ATTR_TYPE_UINT64,
     MOS_ATTR_TYPE_TIMESTAMP,
-    MOS_ATTR_TYPE_STRING
+    MOS_ATTR_TYPE_STRING,
+    MOS_ATTR_TYPE_VECTOR
 } MOS_ATTR_TYPE;
 
 #pragma pack(push, 1)
@@ -33,12 +36,24 @@ typedef struct mos_t_attr_info {
 #pragma pack(pop)
 
 #pragma pack(push, 1)
+typedef struct mos_t_idx_params_hnsw {
+    uint64_t vector_dim;
+    mos_t_idx_hnsw_graph_config graph_config;
+} mos_t_idx_params_hnsw;
+#pragma pack(pop)
+
+#pragma pack(push, 1)
 typedef struct mos_t_idx {
     char name[32];
     MOS_IDX_TYPE type;
     uint64_t offset_file;   // offset in the storage file
     uint64_t index_size;    // bytes occupied in the storage file
     mos_t_attr_info attribute;
+
+    //optional parameters that are to be selected based on field `type`
+    union {
+        mos_t_idx_params_hnsw hnsw;
+    } params;
 } mos_t_idx;
 #pragma pack(pop)
 

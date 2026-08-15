@@ -208,7 +208,7 @@ void mos_indexes_put(mos_t_storage* storage, uint64_t id, void* record_data, uin
             byte_size = attribute.byte_size;
         }
 
-        //get the attribute value from the record. This value will be used for creating the hash.
+        //get the attribute value from the record. This value will be used for the index.
         mos_idx_put(idx->type, idx_data, attr_base, byte_size, record_row_id);
     }
     mos_idx_id_put(storage, id, record_row_id);

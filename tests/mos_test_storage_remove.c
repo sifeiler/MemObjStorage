@@ -57,17 +57,17 @@ void setUp(void) {
 
     //fake internal id_idx
     mos_t_idx id_idx = {
-        .offset_file = 24576,
+        .index_offset = 0,
         .name = "id_idx",
         .type = MOS_IDX_HASH_MAP,
-        .index_size = 4096,
+        .index_size = 8192,     //padded header + padded values & verifiers
         .attribute = id
     };
     mos_t_idx prop1_idx = {
-        .offset_file = 24576 + 4096,
+        .index_offset = 12288,     //padded index data header + padded header + padded values & verifiers
         .name = "idx_prop1",
         .type = MOS_IDX_HASH_MAP,
-        .index_size = 4096,
+        .index_size = 8192,     //padded header + padded values & verifiers
         .attribute = prop1
     };
     test_config.indexes[0] = id_idx;

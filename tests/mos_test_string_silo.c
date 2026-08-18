@@ -8,6 +8,7 @@
 #include "../include/mos_string.h"
 #include "../include/mos_utils.h"
 #include "../include/mos_internal.h"
+#include "../include/mos_math.h"
 
 #define MAX_STRING_LEN 50
 

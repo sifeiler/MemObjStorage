@@ -1,5 +1,6 @@
 #include "../include/mos_string.h"
 #include "../include/mos_utils.h"
+#include "../include/mos_math.h"
 
 //for docs see declaration in mos_string.h
 void mos_string_get(void* silo_pointer, mos_t_string_silo* string_silo, mos_t_string_desc* sd, char** result) {

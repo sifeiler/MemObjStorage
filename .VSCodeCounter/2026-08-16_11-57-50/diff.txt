@@ -1,0 +1,47 @@
+Date : 2026-08-16 11:57:50
+Directory : /home/simon/Projects/Dev/MemObjStorage/src
+Total : 19 files,  1186 codes, -74 comments, 228 blanks, all 1340 lines
+
+Languages
++----------+------------+------------+------------+------------+------------+
+| language | files      | code       | comment    | blank      | total      |
++----------+------------+------------+------------+------------+------------+
+| C        |          8 |      1,746 |        310 |        398 |      2,454 |
+| C++      |         11 |       -560 |       -384 |       -170 |     -1,114 |
++----------+------------+------------+------------+------------+------------+
+
+Directories
++----------------------------------------------------------------+------------+------------+------------+------------+------------+
+| path                                                           | files      | code       | comment    | blank      | total      |
++----------------------------------------------------------------+------------+------------+------------+------------+------------+
+| .                                                              |         19 |      1,186 |        -74 |        228 |      1,340 |
+| . (Files)                                                      |          8 |      1,746 |        310 |        398 |      2,454 |
+| ..                                                             |         11 |       -560 |       -384 |       -170 |     -1,114 |
+| ../include                                                     |         11 |       -560 |       -384 |       -170 |     -1,114 |
++----------------------------------------------------------------+------------+------------+------------+------------+------------+
+
+Files
++----------------------------------------------------------------+----------+------------+------------+------------+------------+
+| filename                                                       | language | code       | comment    | blank      | total      |
++----------------------------------------------------------------+----------+------------+------------+------------+------------+
+| /home/simon/Projects/Dev/MemObjStorage/include/mos.h           | C++      |        -62 |        -74 |        -23 |       -159 |
+| /home/simon/Projects/Dev/MemObjStorage/include/mos_idx.h       | C++      |        -54 |        -10 |        -12 |        -76 |
+| /home/simon/Projects/Dev/MemObjStorage/include/mos_idx_hmap.h  | C++      |        -30 |        -64 |        -14 |       -108 |
+| /home/simon/Projects/Dev/MemObjStorage/include/mos_idx_hnsw.h  | C++      |        -71 |        -43 |        -24 |       -138 |
+| /home/simon/Projects/Dev/MemObjStorage/include/mos_internal.h  | C++      |       -156 |        -70 |        -33 |       -259 |
+| /home/simon/Projects/Dev/MemObjStorage/include/mos_math.h      | C++      |        -15 |        -30 |        -13 |        -58 |
+| /home/simon/Projects/Dev/MemObjStorage/include/mos_os.h        | C++      |        -68 |         -4 |        -18 |        -90 |
+| /home/simon/Projects/Dev/MemObjStorage/include/mos_qry.h       | C++      |         -9 |         -3 |         -3 |        -15 |
+| /home/simon/Projects/Dev/MemObjStorage/include/mos_string.h    | C++      |        -33 |        -65 |        -11 |       -109 |
+| /home/simon/Projects/Dev/MemObjStorage/include/mos_types_fwd.h | C++      |        -26 |         -6 |         -5 |        -37 |
+| /home/simon/Projects/Dev/MemObjStorage/include/mos_utils.h     | C++      |        -36 |        -15 |        -14 |        -65 |
+| /home/simon/Projects/Dev/MemObjStorage/src/main.c              | C        |         63 |          9 |         13 |         85 |
+| /home/simon/Projects/Dev/MemObjStorage/src/mos_core.c          | C        |        484 |         86 |        117 |        687 |
+| /home/simon/Projects/Dev/MemObjStorage/src/mos_idx.c           | C        |         55 |          8 |         16 |         79 |
+| /home/simon/Projects/Dev/MemObjStorage/src/mos_idx_hmap.c      | C        |        190 |         16 |         51 |        257 |
+| /home/simon/Projects/Dev/MemObjStorage/src/mos_idx_hnsw.c      | C        |        531 |        119 |        114 |        764 |
+| /home/simon/Projects/Dev/MemObjStorage/src/mos_math.c          | C        |         62 |         10 |         18 |         90 |
+| /home/simon/Projects/Dev/MemObjStorage/src/mos_qry.c           | C        |        303 |         51 |         54 |        408 |
+| /home/simon/Projects/Dev/MemObjStorage/src/mos_string.c        | C        |         58 |         11 |         15 |         84 |
+| Total                                                          |          |      1,186 |        -74 |        228 |      1,340 |
++----------------------------------------------------------------+----------+------------+------------+------------+------------+

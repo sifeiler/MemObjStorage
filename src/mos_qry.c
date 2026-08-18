@@ -79,7 +79,7 @@ void mos_qry_build_exec_stack(mos_t_storage* storage, mos_t_qry_bmp_exec_stack* 
         }
 
         curr_step->attr_query = search_step->attribute_query;
-        curr_step->idx_data = MOS_GET_PTR(storage->mmap_ptr, index->offset_file);
+        curr_step->idx_data = MOS_GET_PTR(storage->index_data, index->index_offset);
         curr_step->idx_type = index->type;
         curr_step->sub_step_count = 0;
     } else {

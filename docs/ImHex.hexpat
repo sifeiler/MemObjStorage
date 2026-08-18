@@ -62,7 +62,7 @@ struct mos_t_attr_info {
 struct mos_t_idx {
     char name[32];
     u32 type;          //C enum entry typically translates to 32 bits
-    u64 offset_file;   // offset in the storage file
+    u64 index_offset;
     u64 index_size;    // bytes occupied in the storage file 
 };
 

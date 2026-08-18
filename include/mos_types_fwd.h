@@ -13,6 +13,7 @@ typedef struct mos_t_idx_hmap_header mos_t_idx_hmap_header;
 typedef struct mos_t_idx_hmap mos_t_idx_hmap;
 
 typedef struct mos_t_idx_hnsw_graph_config mos_t_idx_hnsw_graph_config;
+typedef union mos_idx_put_result mos_idx_put_result;
 
 /* =========================================================================
    mos.h FORWARD DECLARATIONS

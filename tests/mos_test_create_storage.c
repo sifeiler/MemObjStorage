@@ -10,6 +10,7 @@
 #include "../include/mos_internal.h"
 #include "../include/mos_idx.h"
 #include "../include/mos_utils.h"
+#include "../include/mos_math.h"
 
 typedef struct {
     uint64_t prop1;
@@ -59,7 +60,7 @@ void setUp(void) {
             .byte_size = 8,
             .external_offset = offsetof(TestEntry, prop1)
         },
-        .index_size = 4096
+        .index_size = 8192
     };
     test_config.indexes[0] = prop1_idx;
 
@@ -94,10 +95,10 @@ void mos_test_mos_init_layout__layout_correct(void) {
     uint64_t exp_record_size = MOS_ALIGN_UP(33, 8);
     uint64_t exp_record_data_size = 16;
     uint64_t exp_records_size = MOS_ALIGN_UP(100 * exp_record_size, 4096);
-    uint64_t exp_index_data_size = 2 * 8192;
+    uint64_t exp_index_data_size = 2 * 12288;     //2 * (padded index data header + padded header + padded values & verifiers)
     //no string attributes, so string_silo is of size 0
     uint64_t exp_string_silo_size = 0;
-    uint64_t exp_file_size = 40960;
+    uint64_t exp_file_size = 49152;
 
     //Act
     mos_t_config* internal_config = mos_init_internal_config(&test_config.config);
@@ -187,9 +188,9 @@ void mos_test_mos_create_storage__check_header_area(void) {
             .record_size = 40,
             .record_data_size = 16,
             .records_size = 4096,
-            .index_data_size = 16384,
+            .index_data_size = 2 * 12288,     //2 * (padded index data header + padded header + padded values & verifiers)
             .string_silo_size = 0,
-            .file_size = 40960,
+            .file_size = 49152,
             .offset_header = 0,
             .offset_attributes = 4096,
             .offset_indexes = 8192,
@@ -197,14 +198,14 @@ void mos_test_mos_create_storage__check_header_area(void) {
             .offset_ready_bitmap = 16384,
             .offset_records = 20480,
             .offset_index_data = 24576,
-            .offset_string_silo = 40960
+            .offset_string_silo = 49152
         },
         .state = {
             .last_deleted_row_id = MOS_NULL_OFFSET,
             .next_free_row_id = 0
         },
         .string_silo = {
-            .base_offset = 40960,
+            .base_offset = 49152,
             .current_offset = 0,
             .last_deleted = {
                 .str_offset = MOS_NULL_OFFSET,
@@ -253,7 +254,7 @@ void print_storage_index(const mos_t_idx* idx) {
     printf("Name:        %s\n", idx->name);
     printf("Type:        %d\n", idx->type);
     printf("Index Size:  %zu bytes\n", (size_t)idx->index_size);
-    printf("File Offset: 0x%08lX\n", (unsigned long)idx->offset_file);
+    printf("Index Data Offset: 0x%08lX\n", (unsigned long)idx->index_offset);
     printf("Attr Name: %s\n", idx->attribute.name);
     printf("Attr Type: %d\n", idx->attribute.type);
     printf("Attr External Offset: 0x%08lX\n", (unsigned long)idx->attribute.external_offset);
@@ -273,26 +274,28 @@ void mos_test_mos_create_storage__check_index_area(void) {
     mos_t_idx id_index = {
         .name = "idx_id",
         .type = MOS_IDX_HASH_MAP,
-        .index_size = 8192,
+        .index_size = 8192,     //padded header + padded values & verifiers
         .attribute = {
             .name = "id",
             .type = MOS_ATTR_TYPE_UINT64,
             .byte_size = 8,
             .external_offset = MOS_NULL_OFFSET,
         },
-        .offset_file = test_config.storage->storage_header->layout.offset_index_data
+        .index_offset = 0,
+        .params = {0}
     };
     mos_t_idx prop1_idx = {
         .name = "idx_prop1",
         .type = MOS_IDX_HASH_MAP,
-        .index_size = 8192,
+        .index_size = 8192,     //padded header + padded values & verifiers
         .attribute = {
             .name = "prop1",
             .type = MOS_ATTR_TYPE_UINT64,
             .byte_size = 8,
             .external_offset = offsetof(TestEntry, prop1)
         },
-        .offset_file = test_config.storage->storage_header->layout.offset_index_data + 8192
+        .index_offset = 12288,     //padded index data header + padded header + padded values & verifiers
+        .params = {0}
     };
     expected_indexes[0] = id_index;
     expected_indexes[1] = prop1_idx;

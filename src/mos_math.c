@@ -4,6 +4,7 @@
 #include <math.h>
 
 #include "../include/mos_math.h"
+#include "../include/mos_internal.h"
 
 #define MOS_MATH_SIMD_WIDTH 16
 
@@ -24,20 +25,25 @@ float mos_math_reduce___m256_add_ps(__m256 v) {
 /**
  * Calculates the dot product of vector `v1` and vector `v2`. Both vectors have `dimension` float values.
  */
-float mos_math_dot_product_avx2(float* v1, float* v2, uint64_t dimension) {
+float mos_math_dot_product_avx2(const float* v1, const float* v2, const uint64_t dimension) {
     //we use 256 bit instructions. One float has 32 bits. Per instruction we can process 256 / 32 = 8 flaots.
 
     __m256 result_reg = _mm256_setzero_ps();
     int64_t dim = (int64_t)dimension;
+    float result_float;
     int i = 0;
-    for(; i <= dim - 8; i += 8) {
-        //load vectors into registers
-        __m256 v1_reg = _mm256_loadu_ps(&v1[i]);    //use _mm256_load_ps if vectors are always 32 byte aligned
-        __m256 v2_reg = _mm256_loadu_ps(&v2[i]);
-        result_reg = _mm256_fmadd_ps(v1_reg, v2_reg, result_reg);
-    }
 
-    float result_float = mos_math_reduce___m256_add_ps(result_reg);
+    //is avx2 supported?
+    if(MOS_HAS_SIMD && MOS_SIMD_REGISTER_BYTES == 32) {
+        for(; i <= dim - 8; i += 8) {
+            //load vectors into registers
+            __m256 v1_reg = _mm256_loadu_ps(&v1[i]);    //use _mm256_load_ps if vectors are always 32 byte aligned
+            __m256 v2_reg = _mm256_loadu_ps(&v2[i]);
+            result_reg = _mm256_fmadd_ps(v1_reg, v2_reg, result_reg);
+        }
+
+        result_float = mos_math_reduce___m256_add_ps(result_reg);
+    }
 
     //in case vectors are not a multiple of 8
     for(; i < dim; i++) {
@@ -47,20 +53,26 @@ float mos_math_dot_product_avx2(float* v1, float* v2, uint64_t dimension) {
     return result_float;
 }
 
-float mos_math_euclidian_distance_squared_avx2(float* v1, float* v2, uint64_t dimension) {
+float mos_math_euclidian_distance_squared_avx2(const float* v1, const float* v2, const uint64_t dimension) {
     __m256 result_reg = _mm256_setzero_ps();
 
     int64_t dim = (int64_t)dimension;
+    float result_float = 0;
     int i = 0;
-    for(; i <= dim - 8; i += 8) {
-        //load vectors into registers
-        __m256 v1_reg = _mm256_loadu_ps(&v1[i]);
-        __m256 v2_reg = _mm256_loadu_ps(&v2[i]);
-        __m256 sub_reg = _mm256_sub_ps(v1_reg, v2_reg);
-        result_reg = _mm256_fmadd_ps(sub_reg, sub_reg, result_reg);
-    }
 
-    float result_float = mos_math_reduce___m256_add_ps(result_reg);
+    //is avx2 supported?
+    if(MOS_HAS_SIMD && MOS_SIMD_REGISTER_BYTES == 32) {
+        for(; i <= dim - 8; i += 8) {
+            //load vectors into registers
+            __m256 v1_reg = _mm256_loadu_ps(&v1[i]);
+            __m256 v2_reg = _mm256_loadu_ps(&v2[i]);
+            __m256 sub_reg = _mm256_sub_ps(v1_reg, v2_reg);
+            result_reg = _mm256_fmadd_ps(sub_reg, sub_reg, result_reg);
+        }
+
+        result_float = mos_math_reduce___m256_add_ps(result_reg);
+    }
+    
 
     for(; i < dim; i++) {
         float sub = v1[i] - v2[i];
@@ -70,21 +82,23 @@ float mos_math_euclidian_distance_squared_avx2(float* v1, float* v2, uint64_t di
     return result_float;
 }
 
-float mos_idx_hnsw_calc_distance(float* v1, float* v2, uint16_t dimension, MOS_T_IDX_HNSW_METRIC metric) {
+float mos_math_calc_distance(const float* v1, const float* v2, const uint16_t dimension, const MOS_T_IDX_HNSW_METRIC metric) {
     switch (metric) {
         case METRIC_COSINE:     //vectors are assumed to be pre-normalized
-            float dp = mos_math_dot_product_avx2(v1, v2, dimension);
-            return 1 - dp;
+            return 1 - mos_math_dot_product_avx2(v1, v2, dimension);
         case METRIC_L2:
             return mos_math_euclidian_distance_squared_avx2(v1, v2, dimension);
         case METRIC_DOT_PRODUCT:
-            float dp = mos_math_dot_product_avx2(v1, v2, dimension);
             //negate: the higher the dp, the more v1 and v2 point in the same direction.
             // we want the higher the dp, the smaller the distance
-            return -dp;
+            return -mos_math_dot_product_avx2(v1, v2, dimension);
     }
 }
 
-uint16_t mos_math_calc_padded_vector_dimension(uint16_t logical_dims) {
-    
+uint16_t mos_math_calc_padded_vector_dimension(const uint16_t logical_dim) {
+    if(MOS_HAS_SIMD) {
+        return MOS_ALIGN_UP(logical_dim, MOS_SIMD_REGISTER_BYTES / sizeof(float));
+    } else {
+        return logical_dim;
+    }
 }

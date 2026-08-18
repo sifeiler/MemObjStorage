@@ -2,6 +2,7 @@
 #define MOS_H
 
 #include <stdint.h>
+#include "mos_types_fwd.h"
 
 /* =========================================================================
    API file of the storage library.
@@ -36,8 +37,42 @@ typedef struct mos_t_attr_info {
 #pragma pack(pop)
 
 #pragma pack(push, 1)
+typedef struct mos_t_idx_hnsw_graph_config {
+    //graph parameters
+    /**
+     * Caps neighbor count per node; 
+     * controls memory, graph density, and recall/speed tradeoff
+     */
+    uint16_t m;
+
+    /**
+     * Max connections allowed at layer 0.
+     * Usually set to 2*m, since layer 0 holds all nodes and benefits from denser connectivity.
+     */
+    uint16_t m_max0;
+
+    /**
+     * Controls how thoroughly candidate neighbors are searched for when wiring up a new node.
+     * Higher means a better-quality graph, leading to better recall.
+    */
+    uint16_t ef_construction;
+    
+    /**
+     * Shapes the layer hierarchy; controls how many nodes end up in upper layers
+     * Multiplying by mL scales the node distribution in the graph.
+     * mL isn't a probability itself - it's a scaling factor that controls how "stretched out" the exponential distribution is,
+     *  which in turn controls how many nodes randomly land on higher layers.
+     * Smaller mL compresses the distribution toward layer 0 (flatter hierarchy, fewer upper layers used);
+     * Larger mL stretches it out (taller hierarchy, more nodes reaching high layers).
+     */
+    float mL;
+} mos_t_idx_hnsw_graph_config;
+#pragma pack(pop)
+
+#pragma pack(push, 1)
 typedef struct mos_t_idx_params_hnsw {
-    uint64_t vector_dim;
+    uint64_t vector_dim;    //the logical vector dimension
+    uint8_t vector_metric;  //MOS_T_IDX_HNSW_METRIC
     mos_t_idx_hnsw_graph_config graph_config;
 } mos_t_idx_params_hnsw;
 #pragma pack(pop)
@@ -46,7 +81,7 @@ typedef struct mos_t_idx_params_hnsw {
 typedef struct mos_t_idx {
     char name[32];
     MOS_IDX_TYPE type;
-    uint64_t offset_file;   // offset in the storage file
+    uint64_t index_offset;  // offset in index_data section (first index has offset 0)
     uint64_t index_size;    // bytes occupied in the storage file
     mos_t_attr_info attribute;
 
@@ -70,6 +105,7 @@ typedef struct mos_t_config mos_t_config;
 typedef struct mos_t_storage mos_t_storage;
 typedef struct mos_t_qry mos_t_qry;
 typedef struct mos_t_qry_bmp mos_t_qry_bmp;
+typedef struct mos_t_idx_hnsw_graph_config mos_t_idx_hnsw_graph_config;
 
 /* =========================================================================
    FUNCTION DECLARATIONS

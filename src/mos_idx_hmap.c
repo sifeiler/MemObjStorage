@@ -6,6 +6,21 @@
 #include "../include/mos_internal.h"
 #include "../include/mos_utils.h"
 #include "../include/mos_types_fwd.h"
+#include "../include/mos_math.h"
+
+typedef struct mos_t_idx_hmap_idx_size {
+    uint64_t header_size_page_padded;
+    uint64_t table_size_padded;
+    uint64_t item_size;
+    uint64_t index_data_size_padded;
+    uint64_t total_index_size_page_padded;
+} mos_t_idx_hmap_idx_size;
+
+typedef struct mos_t_idx_hmap_ptrs {
+    mos_t_idx_hmap* hmap;
+    uint64_t* index_values;
+    uint64_t* index_verifiers;
+} mos_t_idx_hmap_ptrs;
 
 __uint128_t mos_idx_murmur_hash_3_128(const uint8_t* data, const uint64_t seed, const size_t key_byte_len);
 
@@ -85,42 +100,60 @@ __uint128_t mos_idx_murmur_hash_3_128(const uint8_t* data, const uint64_t seed, 
     return ((__uint128_t)hash2 << 64) | hash1;
 }
 
-/* Implementation of hash map index size. See hash_map_index.h for documentation. */
-uint64_t mos_idx_hmap_size(uint64_t item_count, mos_t_idx* idx) {
-    uint64_t index_data_size = sizeof(mos_t_idx_hmap_header);
-    uint64_t item_size = sizeof(*((mos_t_idx_hmap*)0)->data);
-    uint64_t table_size = mos_utils_next_pow_of_2(2 * item_count);
+mos_t_idx_hmap_idx_size mos_idx_hnsw_get_index_size(const uint64_t item_count, mos_t_idx* idx) {
+    mos_t_idx_hmap_idx_size index_sizes;
+    index_sizes.header_size_page_padded = MOS_ALIGN_UP(sizeof(mos_t_idx_hmap_header), MOS_PAGE_SIZE);
+    index_sizes.item_size = sizeof(*((mos_t_idx_hmap*)0)->data);
+
+    //alignment to next power of 2 is important for fast modulo operations (AND)
+    index_sizes.table_size_padded = mos_utils_next_pow_of_2(2 * item_count);
 
     //Hash map should only be 50% full, so we double the table size.
     //We add the table size twice: once for the values, once for the verifiers, multiplied by the item size
-    index_data_size += 2 * table_size * item_size;
-    return MOS_ALIGN_UP(index_data_size, MOS_PAGE_SIZE);
+    index_sizes.index_data_size_padded = MOS_ALIGN_UP(2 * index_sizes.table_size_padded * index_sizes.item_size, MOS_PAGE_SIZE);
+    
+    index_sizes.total_index_size_page_padded = index_sizes.header_size_page_padded + index_sizes.index_data_size_padded;
+    return index_sizes;
+}
+
+static inline mos_t_idx_hmap_ptrs mos_idx_hmap_get_data_ptrs(mos_t_idx_data* idx_data) {
+    mos_t_idx_hmap* hmap_index = ((uint8_t*)idx_data) + idx_data->header.index_payload_offset;
+    mos_t_idx_hmap_ptrs ptrs;
+    ptrs.hmap = hmap_index;
+    ptrs.index_values = (uint64_t*)(((uint8_t*)hmap_index) + hmap_index->index_header.offset_values);
+    ptrs.index_verifiers = (uint64_t*)(((uint8_t*)hmap_index) + hmap_index->index_header.offset_verifiers);
+    return ptrs;
+}
+
+/* Implementation of hash map index size. See hash_map_index.h for documentation. */
+uint64_t mos_idx_hmap_size(uint64_t item_count, mos_t_idx* idx) {
+    mos_t_idx_hmap_idx_size index_size = mos_idx_hnsw_get_index_size(item_count, idx);
+    return index_size.total_index_size_page_padded;
 }
 
 /* Implementation of hash map index initialization. See hash_map_index.h for documentation. */
 void mos_idx_hmap_init(uint64_t item_count, mos_t_idx* idx, mos_t_idx_data* idx_data) {
-    mos_t_idx_hmap* idx_hash_map = (mos_t_idx_hmap*)idx_data->index_payload;
+    mos_t_idx_hmap_ptrs hmap_ptrs = mos_idx_hmap_get_data_ptrs(idx_data);
+    mos_t_idx_hmap* idx_hash_map = hmap_ptrs.hmap;
+    mos_t_idx_hmap_idx_size index_size = mos_idx_hnsw_get_index_size(item_count, idx);
    
-    //alignment to next power of 2 is important for fast modulo operations (AND)
-    uint64_t table_size = mos_utils_next_pow_of_2(2 * item_count);
-    idx->index_size = mos_idx_hmap_size(item_count, idx);
-    idx_hash_map->index_header.table_size = table_size;
+    idx->index_size = index_size.total_index_size_page_padded;
+    idx_hash_map->index_header.table_size = index_size.table_size_padded;
 
     //index values come right after the header
-    uint64_t index_values_offset = idx->offset_file + offsetof(mos_t_idx_data, index_payload) + sizeof(mos_t_idx_hmap_header);
-    //values + verifiers
-    uint64_t index_data_size = idx->index_size - sizeof(mos_t_idx_hmap_header);
+    uint64_t index_values_offset = index_size.header_size_page_padded;
     idx_hash_map->index_header.offset_values = index_values_offset;
     //index verifiers come right after the index values
-    idx_hash_map->index_header.offset_verifiers = index_values_offset + (index_data_size / 2);
+    idx_hash_map->index_header.offset_verifiers = index_values_offset + (index_size.table_size_padded * sizeof(uint64_t));
 }
 
-int64_t mos_idx_hmap_put(const mos_t_idx_data* idx_data, const uint8_t* key, const size_t key_byte_len, const uint64_t value) {
-    mos_t_idx_hmap* index = (mos_t_idx_hmap*)idx_data->index_payload;
+int64_t mos_idx_hmap_put(mos_t_idx_data* idx_data, const uint8_t* key, const size_t key_byte_len, const uint64_t value, mos_idx_put_result* result) {
+    mos_t_idx_hmap_ptrs hmap_ptrs = mos_idx_hmap_get_data_ptrs(idx_data);
+    mos_t_idx_hmap* index = hmap_ptrs.hmap;
     mos_t_idx_hmap_header index_header = index->index_header;
     uint64_t table_size = index_header.table_size;
-    uint64_t* index_values = index->data;
-    uint64_t* index_verifiers = index->data + table_size;
+    uint64_t* index_values = hmap_ptrs.index_values;
+    uint64_t* index_verifiers = hmap_ptrs.index_verifiers;
 
     __uint128_t hash = mos_idx_murmur_hash_3_128(key, MOS_IDX_MURMUR3_SEED, key_byte_len);
     uint64_t index_verifier = (hash >> 64);
@@ -165,10 +198,11 @@ int64_t mos_idx_hmap_put(const mos_t_idx_data* idx_data, const uint8_t* key, con
 }
 
 int64_t mos_idx_hmap_find_row_id(const mos_t_idx_data* idx_data, const uint8_t* key, const size_t key_byte_len) {
-    mos_t_idx_hmap* index = (mos_t_idx_hmap*)idx_data->index_payload;
+    mos_t_idx_hmap_ptrs hmap_ptrs = mos_idx_hmap_get_data_ptrs(idx_data);
+    mos_t_idx_hmap* index = hmap_ptrs.hmap;
     mos_t_idx_hmap_header index_header = index->index_header;
     uint64_t table_size = index_header.table_size;
-    uint64_t* index_verifiers = index->data + table_size;
+    uint64_t* index_verifiers = hmap_ptrs.index_verifiers;
 
     __uint128_t hash = mos_idx_murmur_hash_3_128(key, MOS_IDX_MURMUR3_SEED, key_byte_len);
     uint64_t mask = index_header.table_size - 1;
@@ -192,8 +226,9 @@ int64_t mos_idx_hmap_find_row_id(const mos_t_idx_data* idx_data, const uint8_t* 
 }
 
 int64_t mos_idx_hmap_get(const mos_t_idx_data* idx_data, const uint8_t* key, const size_t key_len) {
-    mos_t_idx_hmap* index = (mos_t_idx_hmap*)idx_data->index_payload;
-    uint64_t* index_values = index->data;
+    mos_t_idx_hmap_ptrs hmap_ptrs = mos_idx_hmap_get_data_ptrs(idx_data);
+    mos_t_idx_hmap* index = hmap_ptrs.hmap;
+    uint64_t* index_values = hmap_ptrs.index_values;
 
     int64_t i = mos_idx_hmap_find_row_id(idx_data, key, key_len);
 
@@ -204,12 +239,13 @@ int64_t mos_idx_hmap_get(const mos_t_idx_data* idx_data, const uint8_t* key, con
     return index_values[i];
 }
 
-void mos_idx_hmap_remove(const mos_t_idx_data* idx_data, const uint8_t* key, const size_t key_byte_len) {
-    mos_t_idx_hmap* index = (mos_t_idx_hmap*)idx_data->index_payload;
+void mos_idx_hmap_remove(mos_t_idx_data* idx_data, const uint8_t* key, const size_t key_byte_len) {
+    mos_t_idx_hmap_ptrs hmap_ptrs = mos_idx_hmap_get_data_ptrs(idx_data);
+    mos_t_idx_hmap* index = hmap_ptrs.hmap;
     mos_t_idx_hmap_header index_header = index->index_header;
     uint64_t table_size = index_header.table_size;
-    uint64_t* index_values = index->data;
-    uint64_t* index_verifiers = index->data + table_size;
+    uint64_t* index_values = hmap_ptrs.index_values;
+    uint64_t* index_verifiers = hmap_ptrs.index_verifiers;
 
     int64_t i = mos_idx_hmap_find_row_id(idx_data, key, key_byte_len);
 

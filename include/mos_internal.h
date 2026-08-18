@@ -32,6 +32,22 @@ static const uint8_t TYPE_SIZES[] = {
 #define VALID 1
 #define INVALID 0
 
+#if defined(__AVX512F__)
+    #define MOS_SIMD_REGISTER_BYTES 64
+    #define MOS_HAS_SIMD 1
+#elif defined(__AVX2__)
+    #define MOS_SIMD_REGISTER_BYTES 32
+    #define MOS_HAS_SIMD 1
+#elif defined(__SSE2__) || defined(_M_X64) || defined(_M_AMD64)
+    #define MOS_SIMD_REGISTER_BYTES 16
+    #define MOS_HAS_SIMD 1
+#elif defined(__ARM_NEON) || defined(__ARM_NEON__)
+    #define MOS_SIMD_REGISTER_BYTES 16
+    #define MOS_HAS_SIMD 1
+#else
+    #define MOS_HAS_SIMD 0
+#endif
+
 /* =========================================================================
    2. STRUCTS
    ========================================================================= */
@@ -123,8 +139,15 @@ typedef enum MOS_QRY_OPERATOR {
 #define MOS_QRY_LOGICAL_OP (MOS_QRY_OP_OR | MOS_QRY_OP_AND | MOS_QRY_OP_NOT)
 #define MOS_QRY_RELATIONAL_OP (MOS_QRY_OP_EQ | MOS_QRY_OP_GT | MOS_QRY_OP_LT | MOS_QRY_OP_SIMILAR)
 
+#pragma pack(push, 1)
+typedef struct mos_t_float_vector {
+    float* vector;
+    uint16_t vector_dim;
+} mos_t_float_vector;
+#pragma pack(pop)
+
 typedef struct mos_t_attr_value_vector {
-    uint16_t ef;     // Must be >= k, the number of neighbors requested. Higher ef = better recall, slower search.
+    uint16_t ef;            // Must be >= k, the number of neighbors requested. Higher ef = better recall, slower search.
     uint64_t top_k;         // Return at most k results,
     float threshold;        // but only results with similarity >= threshold
     uint64_t vector_dim;    // depends on embedding (used model)

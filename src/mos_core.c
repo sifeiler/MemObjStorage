@@ -14,6 +14,7 @@
 #include "../include/mos_os.h"
 #include "../include/mos_qry.h"
 #include "../include/mos_string.h"
+#include "../include/mos_math.h"
 
 /* =========================================================================
    1. FORWARD DECLARATIONS
@@ -174,16 +175,16 @@ uint64_t mos_get_current_time_millis() {
 }
 void mos_idx_id_put(mos_t_storage* storage, uint64_t id, uint64_t record_row_id) {
     mos_t_idx* id_idx = storage->indexes;
-    mos_t_idx_data* id_idx_data = MOS_GET_PTR(storage->mmap_ptr, id_idx->offset_file);
+    mos_t_idx_data* id_idx_data = MOS_GET_PTR(storage->index_data, id_idx->index_offset);
     uint8_t* key_ptr = (uint8_t*)&id;
-    mos_idx_put(id_idx->type, id_idx_data, key_ptr, sizeof(id), record_row_id);
+    mos_idx_put(id_idx->type, id_idx_data, key_ptr, sizeof(id), record_row_id, NULL);
 }
 
 void mos_idx_id_remove(mos_t_storage* storage, uint64_t id, uint64_t record_row_id) {
     mos_t_idx* id_idx = storage->indexes;
-    mos_t_idx_data* id_idx_data = MOS_GET_PTR(storage->mmap_ptr, id_idx->offset_file);
+    mos_t_idx_data* id_idx_data = MOS_GET_PTR(storage->index_data, id_idx->index_offset);
     uint8_t* key_ptr = (uint8_t*)&id;
-    mos_idx_put(id_idx->type, id_idx_data, key_ptr, sizeof(id), record_row_id);
+    mos_idx_remove_value(id_idx->type, id_idx_data, key_ptr, sizeof(id));
 }
 
 void mos_indexes_put(mos_t_storage* storage, uint64_t id, void* record_data, uint64_t record_row_id) {
@@ -191,7 +192,7 @@ void mos_indexes_put(mos_t_storage* storage, uint64_t id, void* record_data, uin
     //skip id index
     for (uint64_t i = 1; i < storage->storage_header->index_count; i++) {
         mos_t_idx* idx = indexes + i;
-        mos_t_idx_data* idx_data = MOS_GET_PTR(storage->mmap_ptr, idx->offset_file);
+        mos_t_idx_data* idx_data = MOS_GET_PTR(storage->index_data, idx->index_offset);
         mos_t_attr_info attribute = idx->attribute;
 
         uint8_t* attr_base = (uint8_t*)record_data + attribute.external_offset;
@@ -208,8 +209,22 @@ void mos_indexes_put(mos_t_storage* storage, uint64_t id, void* record_data, uin
             byte_size = attribute.byte_size;
         }
 
+        //TODO: think about a put pre-/postprocessing step for getting the index data and writing it back to the record.
+        if(attribute.type == MOS_ATTR_TYPE_VECTOR) {
+            mos_t_float_vector* vector = ((mos_t_float_vector*)attr_base);
+            byte_size = vector->vector_dim * sizeof(float);
+            attr_base = (uint8_t*)vector->vector;
+        }
+
+        mos_idx_put_result put_result;
         //get the attribute value from the record. This value will be used for the index.
-        mos_idx_put(idx->type, idx_data, attr_base, byte_size, record_row_id);
+        mos_idx_put(idx->type, idx_data, attr_base, byte_size, record_row_id, &put_result);
+
+        if(attribute.type == MOS_ATTR_TYPE_VECTOR) {
+            uint8_t* record_attr = (uint8_t*)record_data + attribute.external_offset;
+            //all the record remembers is the vecotrs node_id.
+            *record_attr = put_result.hnsw_node_id;
+        }
     }
     mos_idx_id_put(storage, id, record_row_id);
 }
@@ -258,7 +273,7 @@ void mos_put_string(mos_t_storage* storage, mos_t_record* record, mos_t_attr_inf
     //  This is neccessary to get fixed size records. The actual string is moved into the string silo by mos_string_put.
     //  TODO: Do not use the same pointer for both, the actual string and the string descriptor, 
     //        as this can go horribly wrong if mos_string_put writes at the descriptor address before coping the actual string from the address.
-    mos_string_put(storage->string_silo_base, &storage->storage_header->string_silo, str, str);
+    mos_string_put(storage->string_silo_base, &storage->storage_header->string_silo, str, (mos_t_string_desc*)str);
 }
 
 /* =========================================================================
@@ -266,11 +281,11 @@ void mos_put_string(mos_t_storage* storage, mos_t_record* record, mos_t_attr_inf
    ========================================================================= */
 
 mos_t_config* mos_init_internal_config(mos_t_config* external_cfg) {
-    mos_t_config* internal_cfg = malloc(sizeof(mos_t_config));
+    mos_t_config* internal_cfg = calloc(1, sizeof(mos_t_config));
 
-    mos_t_attr_info* attributes = malloc(sizeof(mos_t_attr_info) * external_cfg->attribute_count);
+    mos_t_attr_info* attributes = calloc(external_cfg->attribute_count, sizeof(mos_t_attr_info));
     //+1 for the fixed id index. Every record has an id.
-    mos_t_idx* indexes = malloc(sizeof(mos_t_idx) * (external_cfg->index_count + 1));
+    mos_t_idx* indexes = calloc(external_cfg->index_count + 1, sizeof(mos_t_idx));
     *internal_cfg = *external_cfg;
 
     internal_cfg->attributes = attributes;
@@ -618,7 +633,7 @@ void mos_storage_remove(mos_t_storage* storage, uint64_t id) {
     //skip id index
     for (uint64_t i = 1; i < header->index_count; i++) {
         mos_t_idx* index = indexes + i;
-        mos_t_idx_data* index_data = MOS_GET_PTR(storage->mmap_ptr, index->offset_file);
+        mos_t_idx_data* index_data = MOS_GET_PTR(storage->index_data, index->index_offset);
 
         uint8_t* key = record + offsetof(mos_t_record, data) + index->attribute.external_offset;
         size_t key_len = index->attribute.byte_size;

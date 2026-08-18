@@ -17,62 +17,67 @@ void tearDown(void) {}
 
 void test_mos_idx_hmap_init__even_item_count(void) {
     //Arrange
-    uint8_t test_buffer[MOS_PAGE_SIZE];
-    memset(test_buffer, 0, MOS_PAGE_SIZE);
+    uint16_t buffer_size = MOS_PAGE_SIZE * 3;
+    uint8_t test_buffer[buffer_size];
+    memset(test_buffer, 0, buffer_size);
     mos_t_idx_data* index_data = (mos_t_idx_data*)test_buffer;
-    strncpy(index_data->index.name, "test_index", sizeof(index_data->index.name) - 1);
-    index_data->index.offset_file = 8192;
-    index_data->index.type = MOS_IDX_HASH_MAP;
-    index_data->index.index_size = 0;
+    strncpy(index_data->header.index.name, "test_index", sizeof(index_data->header.index.name) - 1);
+    index_data->header.index.index_offset = 0;
+    index_data->header.index.type = MOS_IDX_HASH_MAP;
+    index_data->header.index.index_size = buffer_size;
+    index_data->header.index_payload_offset = MOS_PAGE_SIZE;
 
     // value will be aligned up to page size and in this case the index fits into a single page
-    uint64_t expected_index_size = MOS_PAGE_SIZE;
+    uint64_t expected_index_size = MOS_PAGE_SIZE * 2;   //page 1: mos_t_idx_data_header, page 2: hmap header, page 3: hmap data
     //20 * 2 = 40 -> 64 (next power of 2)
     uint64_t expected_table_size = 64;
-    uint64_t expected_offset_values = 8192 + offsetof(mos_t_idx_data, index_payload) + sizeof(mos_t_idx_hmap_header);
-    uint64_t expected_offset_verifiers = expected_offset_values + 2036;
+
+    //values and verifiers share a page here
+    uint64_t expected_offset_values = MOS_PAGE_SIZE;
+    uint64_t expected_offset_verifiers = expected_offset_values + (expected_table_size * sizeof(uint64_t));
 
     //Act
-    mos_idx_hmap_init(20, &index_data->index, index_data);
+    mos_idx_hmap_init(20, &index_data->header.index, index_data);
 
     //Assert
-    mos_t_idx_hmap* idx_hash_map = (mos_t_idx_hmap*)index_data->index_payload;
-    TEST_ASSERT_EQUAL(expected_index_size, index_data->index.index_size);
-    TEST_ASSERT_EQUAL(expected_table_size, idx_hash_map->index_header.table_size);
-    TEST_ASSERT_EQUAL(expected_offset_values, idx_hash_map->index_header.offset_values);
-    TEST_ASSERT_EQUAL(expected_offset_verifiers, idx_hash_map->index_header.offset_verifiers);
+    mos_t_idx_hmap* hash_map_index = (mos_t_idx_hmap*)(test_buffer + MOS_PAGE_SIZE);
+    TEST_ASSERT_EQUAL(expected_index_size, index_data->header.index.index_size);
+    TEST_ASSERT_EQUAL(expected_table_size, hash_map_index->index_header.table_size);
+    TEST_ASSERT_EQUAL(expected_offset_values, hash_map_index->index_header.offset_values);
+    TEST_ASSERT_EQUAL(expected_offset_verifiers, hash_map_index->index_header.offset_verifiers);
 }
 
 void test_mos_idx_hmap_init__odd_item_count(void) {
     //Arrange
-    uint8_t test_buffer[MOS_PAGE_SIZE];
-    memset(test_buffer, 0, MOS_PAGE_SIZE);
+    uint16_t buffer_size = MOS_PAGE_SIZE * 3;
+    uint8_t test_buffer[buffer_size];
+    memset(test_buffer, 0, buffer_size);
     mos_t_idx_data* index_data = (mos_t_idx_data*)test_buffer;
-    strncpy(index_data->index.name, "test_index", sizeof(index_data->index.name) - 1);
-    index_data->index.offset_file = 4096;
-    index_data->index.type = MOS_IDX_HASH_MAP;
-    index_data->index.index_size = 0;
+    strncpy(index_data->header.index.name, "test_index", sizeof(index_data->header.index.name) - 1);
+    index_data->header.index.index_offset = 0;
+    index_data->header.index.type = MOS_IDX_HASH_MAP;
+    index_data->header.index.index_size = buffer_size;
+    index_data->header.index_payload_offset = MOS_PAGE_SIZE;
 
-    mos_t_idx_hmap* hash_map_index = (mos_t_idx_hmap*)index_data->index_payload;
-    hash_map_index->index_header.table_size = 8;
+    mos_t_idx_hmap* hash_map_index = (mos_t_idx_hmap*)(test_buffer + MOS_PAGE_SIZE);
 
     // value will be aligned up to page size and in this case the index fits into a single page
-    uint64_t expected_index_size = MOS_PAGE_SIZE;
+    uint64_t expected_index_size = MOS_PAGE_SIZE * 2;   //page 1: mos_t_idx, page 2: hmap header, page 3: hmap data
     //11 * 2 = 22 -> 32 (next power of 2)
     uint64_t expected_table_size = 32;
-    uint64_t expected_offset_values = 4096 + offsetof(mos_t_idx_data, index_payload) + sizeof(mos_t_idx_hmap_header);
-    //2036 due to 4096 Byte page aligning
-    uint64_t expected_offset_verifiers = expected_offset_values + 2036;
+
+    //values and verifiers share a page here
+    uint64_t expected_offset_values = MOS_PAGE_SIZE;
+    uint64_t expected_offset_verifiers = expected_offset_values + (expected_table_size * sizeof(uint64_t));
 
     //Act
-    mos_idx_hmap_init(11, &index_data->index, index_data);
+    mos_idx_hmap_init(11, &index_data->header.index, index_data);
 
     //Assert
-    mos_t_idx_hmap* idx_hash_map = (mos_t_idx_hmap*)index_data->index_payload;
-    TEST_ASSERT_EQUAL(expected_index_size, index_data->index.index_size);
-    TEST_ASSERT_EQUAL(expected_table_size, idx_hash_map->index_header.table_size);
-    TEST_ASSERT_EQUAL(expected_offset_values, idx_hash_map->index_header.offset_values);
-    TEST_ASSERT_EQUAL(expected_offset_verifiers, idx_hash_map->index_header.offset_verifiers);
+    TEST_ASSERT_EQUAL(expected_index_size, index_data->header.index.index_size);
+    TEST_ASSERT_EQUAL(expected_table_size, hash_map_index->index_header.table_size);
+    TEST_ASSERT_EQUAL(expected_offset_values, hash_map_index->index_header.offset_values);
+    TEST_ASSERT_EQUAL(expected_offset_verifiers, hash_map_index->index_header.offset_verifiers);
 }
 
 void test_mos_idx_hmap_size(void) {
@@ -88,16 +93,20 @@ void test_mos_idx_hmap_size(void) {
 
 void test_mos_idx_hmap_put__first_slot_available(void) {
     //Arrange
-    uint8_t test_buffer[MOS_PAGE_SIZE];
-    memset(test_buffer, 0, MOS_PAGE_SIZE);
+    uint16_t buffer_size = MOS_PAGE_SIZE * 3;
+    uint8_t test_buffer[buffer_size];
+    memset(test_buffer, 0, buffer_size);
     mos_t_idx_data* index_data = (mos_t_idx_data*)test_buffer;
-    strncpy(index_data->index.name, "test_index", sizeof(index_data->index.name) - 1);
-    index_data->index.offset_file = 8192;
-    index_data->index.type = MOS_IDX_HASH_MAP;
-    index_data->index.index_size = 0;
+    strncpy(index_data->header.index.name, "test_index", sizeof(index_data->header.index.name) - 1);
+    index_data->header.index.index_offset = 0;
+    index_data->header.index.type = MOS_IDX_HASH_MAP;
+    index_data->header.index.index_size = buffer_size;
+    index_data->header.index_payload_offset = MOS_PAGE_SIZE;
 
-    mos_t_idx_hmap* hash_map_index = (mos_t_idx_hmap*)index_data->index_payload;
+    mos_t_idx_hmap* hash_map_index = (mos_t_idx_hmap*)(test_buffer + MOS_PAGE_SIZE);
     hash_map_index->index_header.table_size = 8;
+    hash_map_index->index_header.offset_values = MOS_PAGE_SIZE;
+    hash_map_index->index_header.offset_verifiers = hash_map_index->index_header.offset_values + (hash_map_index->index_header.table_size * sizeof(uint64_t));
 
     uint8_t key1 = 1;
     uint8_t key2 = 2;
@@ -112,35 +121,40 @@ void test_mos_idx_hmap_put__first_slot_available(void) {
 
     //Act
     // 1 will be hashed to binary ...000 = 0
-    int64_t result1 = mos_idx_hmap_put(index_data, &key1, 1, val1);
+    int64_t result1 = mos_idx_hmap_put(index_data, &key1, 1, val1, NULL);
     // 1 will be hashed to binary ...011 = 3
-    int64_t result2 = mos_idx_hmap_put(index_data, &key2, 1, val2);
+    int64_t result2 = mos_idx_hmap_put(index_data, &key2, 1, val2, NULL);
 
     //Assert
-    uint64_t* values = hash_map_index->data;
-    uint64_t* verifiers = hash_map_index->data + hash_map_index->index_header.table_size;
+    uint64_t* index_values = (uint64_t*)(test_buffer + (MOS_PAGE_SIZE * 2));
+    uint64_t* index_verifiers = index_values + hash_map_index->index_header.table_size;
     TEST_ASSERT_NOT_EQUAL(-1, result1);
     TEST_ASSERT_NOT_EQUAL(-1, result2);
-    TEST_ASSERT_EQUAL_INT64(val1, values[i1]);
-    TEST_ASSERT_EQUAL_INT64(val2, values[i2]);
-    TEST_ASSERT_EQUAL_INT64(verifier1, verifiers[i1]);
-    TEST_ASSERT_EQUAL_INT64(verifier2, verifiers[i2]);
+    TEST_ASSERT_EQUAL_INT64(val1, index_values[i1]);
+    TEST_ASSERT_EQUAL_INT64(val2, index_values[i2]);
+    TEST_ASSERT_EQUAL_INT64(verifier1, index_verifiers[i1]);
+    TEST_ASSERT_EQUAL_INT64(verifier2, index_verifiers[i2]);
 }
 
 void test_mos_idx_hmap_put__first_slot_occupied(void) {
     //Arrange
-    uint8_t test_buffer[MOS_PAGE_SIZE];
-    memset(test_buffer, 0, MOS_PAGE_SIZE);
+    uint16_t buffer_size = MOS_PAGE_SIZE * 3;
+    uint8_t test_buffer[buffer_size];
+    memset(test_buffer, 0, buffer_size);
     mos_t_idx_data* index_data = (mos_t_idx_data*)test_buffer;
-    strncpy(index_data->index.name, "test_index", sizeof(index_data->index.name) - 1);
-    index_data->index.offset_file = 8192;
-    index_data->index.type = MOS_IDX_HASH_MAP;
-    index_data->index.index_size = 0;
+    strncpy(index_data->header.index.name, "test_index", sizeof(index_data->header.index.name) - 1);
+    index_data->header.index.index_offset = 0;
+    index_data->header.index.type = MOS_IDX_HASH_MAP;
+    index_data->header.index.index_size = buffer_size;
+    index_data->header.index_payload_offset = MOS_PAGE_SIZE;
 
-    mos_t_idx_hmap* hash_map_index = (mos_t_idx_hmap*)index_data->index_payload;
+    mos_t_idx_hmap* hash_map_index = (mos_t_idx_hmap*)(test_buffer + MOS_PAGE_SIZE);
     hash_map_index->index_header.table_size = 8;
-    uint64_t* index_values = hash_map_index->data;
-    uint64_t* index_verifiers = hash_map_index->data + hash_map_index->index_header.table_size;
+    hash_map_index->index_header.offset_values = MOS_PAGE_SIZE;
+    hash_map_index->index_header.offset_verifiers = hash_map_index->index_header.offset_values + (hash_map_index->index_header.table_size * sizeof(uint64_t));
+
+    uint64_t* index_values = (uint64_t*)(test_buffer + (MOS_PAGE_SIZE * 2));
+    uint64_t* index_verifiers = index_values + hash_map_index->index_header.table_size;
     index_values[0] = 10;
     index_verifiers[0] = 7;
 
@@ -151,29 +165,34 @@ void test_mos_idx_hmap_put__first_slot_occupied(void) {
 
     //Act
     // 1 will be hashed to binary ...000 = 0
-    mos_idx_hmap_put(index_data, &key1, 1, 5);
+    mos_idx_hmap_put(index_data, &key1, 1, 5, NULL);
 
     //Assert
-    TEST_ASSERT_EQUAL(index_values[0], 10);
-    TEST_ASSERT_EQUAL(index_values[i1], 5);
-    TEST_ASSERT_EQUAL(index_verifiers[0], 7);
-    TEST_ASSERT_EQUAL(index_verifiers[i1], verifier1);
+    TEST_ASSERT_EQUAL(10, index_values[0]);
+    TEST_ASSERT_EQUAL(5, index_values[i1]);
+    TEST_ASSERT_EQUAL(7, index_verifiers[0]);
+    TEST_ASSERT_EQUAL(verifier1, index_verifiers[i1]);
 }
 
 void test_mos_idx_hmap_put__table_full(void) {
     //Arrange
-    uint8_t test_buffer[MOS_PAGE_SIZE];
-    memset(test_buffer, 0, MOS_PAGE_SIZE);
+    uint16_t buffer_size = MOS_PAGE_SIZE * 3;
+    uint8_t test_buffer[buffer_size];
+    memset(test_buffer, 0, buffer_size);
     mos_t_idx_data* index_data = (mos_t_idx_data*)test_buffer;
-    strncpy(index_data->index.name, "test_index", sizeof(index_data->index.name) - 1);
-    index_data->index.offset_file = 8192;
-    index_data->index.type = MOS_IDX_HASH_MAP;
-    index_data->index.index_size = 0;
+    strncpy(index_data->header.index.name, "test_index", sizeof(index_data->header.index.name) - 1);
+    index_data->header.index.index_offset = 0;
+    index_data->header.index.type = MOS_IDX_HASH_MAP;
+    index_data->header.index.index_size = buffer_size;
+    index_data->header.index_payload_offset = MOS_PAGE_SIZE;
 
-    mos_t_idx_hmap* hash_map_index = (mos_t_idx_hmap*)index_data->index_payload;
+    mos_t_idx_hmap* hash_map_index = (mos_t_idx_hmap*)(test_buffer + MOS_PAGE_SIZE);
     hash_map_index->index_header.table_size = 4;
-    uint64_t* index_values = hash_map_index->data;
-    uint64_t* index_verifiers = hash_map_index->data + hash_map_index->index_header.table_size;
+    hash_map_index->index_header.offset_values = MOS_PAGE_SIZE;
+    hash_map_index->index_header.offset_verifiers = hash_map_index->index_header.offset_values + (hash_map_index->index_header.table_size * sizeof(uint64_t));
+
+    uint64_t* index_values = (uint64_t*)(test_buffer + MOS_PAGE_SIZE * 2);
+    uint64_t* index_verifiers = index_values + hash_map_index->index_header.table_size;
 
     index_values[0] = 10;
     index_values[1] = 11;
@@ -188,20 +207,20 @@ void test_mos_idx_hmap_put__table_full(void) {
     uint8_t key1 = 1;
 
     //Act
-    uint64_t result = mos_idx_hmap_put(index_data, &key1, 1, 5);
+    uint64_t result = mos_idx_hmap_put(index_data, &key1, 1, 5, NULL);
 
     //Assert
     TEST_ASSERT_EQUAL(-1, result);
 
     //Assert no values were changed
-    TEST_ASSERT_EQUAL(index_values[0], 10);
-    TEST_ASSERT_EQUAL(index_values[1], 11);
-    TEST_ASSERT_EQUAL(index_values[2], 12);
-    TEST_ASSERT_EQUAL(index_values[3], 13);
-    TEST_ASSERT_EQUAL(index_verifiers[0], 20);
-    TEST_ASSERT_EQUAL(index_verifiers[1], 21);
-    TEST_ASSERT_EQUAL(index_verifiers[2], 22);
-    TEST_ASSERT_EQUAL(index_verifiers[3], 23);
+    TEST_ASSERT_EQUAL(10, index_values[0]);
+    TEST_ASSERT_EQUAL(11, index_values[1]);
+    TEST_ASSERT_EQUAL(12, index_values[2]);
+    TEST_ASSERT_EQUAL(13, index_values[3]);
+    TEST_ASSERT_EQUAL(20, index_verifiers[0]);
+    TEST_ASSERT_EQUAL(21, index_verifiers[1]);
+    TEST_ASSERT_EQUAL(22, index_verifiers[2]);
+    TEST_ASSERT_EQUAL(23, index_verifiers[3]);
 }
 
 int main(void) {

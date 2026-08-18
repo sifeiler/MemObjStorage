@@ -2,14 +2,14 @@
 CC = clang
 AR = ar
 SANITIZERS =
-CFLAGS = -Wall -Wextra -Iinclude -g $(SANITIZERS) -O0 -fno-omit-frame-pointer
+CFLAGS = -Wall -Wextra -Iinclude -g $(SANITIZERS) -O0 -fno-omit-frame-pointer -march=native
 CFLAGS_TEST = -Iinclude -g $(SANITIZERS)
 
 # Directories
 SRC_DIR = src
 OBJ_DIR = build
 TEST_DIR = tests
-INCLUDE_DIR = include
+INCLUDE_DIR = include-march=native
 
 # Logic files (excluding main.c for testing purposes)
 # We exclude main.c because tests usually have their own main()
@@ -101,8 +101,6 @@ clean:
 	rm -f ./tests/*.exe
 
 debug: SANITIZERS = -fsanitize=address,undefined
-debug: CFLAGS += $(SANITIZERS)
-debug: CFLAGS_TEST += $(SANITIZERS)
 debug: $(LIB_OBJS) $(TEST_BINS)
 
 .PHONY: dev_build clean test fuzzy debug lib

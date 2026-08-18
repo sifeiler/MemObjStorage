@@ -8,6 +8,7 @@
 #include "../include/mos_idx_hmap.h"
 #include "../include/mos_idx.h"
 #include "../include/mos_utils.h"
+#include "../include/mos_math.h"
 
 typedef struct {
     uint64_t id;
@@ -52,16 +53,16 @@ void setUp(void) {
 
     //fake internal id_idx
     mos_t_idx id_idx = {
-        .offset_file = 24576,
+        .index_offset = 0,
         .name = "id_idx",
         .type = MOS_IDX_HASH_MAP,
-        .index_size = 4096
+        .index_size = 8192     //padded header + padded values & verifiers
     };
     mos_t_idx prop1_idx = {
-        .offset_file = 24576 + 4096,
+        .index_offset = 12288,     //padded index data header + padded header + padded values & verifiers
         .name = "idx_prop1",
         .type = MOS_IDX_HASH_MAP,
-        .index_size = 4096
+        .index_size = 8192     //padded header + padded values & verifiers
     };
     test_config.indexes[0] = id_idx;
     test_config.indexes[1] = prop1_idx;
@@ -115,10 +116,13 @@ mos_t_storage setup_test_storage(void* memory, mos_t_header* h) {
     storage.string_silo_base = (void*)(base + h->layout.offset_string_silo);
 
     for (int i = 0; i < h->index_count; i++) {
-        uint8_t* idx_page = ((uint8_t*)storage.index_data) + (i * 4096);
+        uint8_t* idx_page = ((uint8_t*)storage.index_data) + (i * 12288);     //i * (padded index data header + padded header + padded values & verifiers)
         mos_t_idx_data* idx_data = (mos_t_idx_data*)idx_page;
-        mos_t_idx_hmap* hm = (mos_t_idx_hmap*)idx_data->index_payload;
+        idx_data->header.index_payload_offset = MOS_ALIGN_UP(sizeof(mos_t_idx_data_header), MOS_PAGE_SIZE);
+        mos_t_idx_hmap* hm = (mos_t_idx_hmap*)(((uint8_t*)idx_data) + idx_data->header.index_payload_offset);
         hm->index_header.table_size = 8;
+        hm->index_header.offset_values = MOS_PAGE_SIZE;
+        hm->index_header.offset_verifiers = hm->index_header.offset_values + (hm->index_header.table_size * sizeof(uint64_t));
     }
 
     return storage;
@@ -126,11 +130,11 @@ mos_t_storage setup_test_storage(void* memory, mos_t_header* h) {
 
 void test_mos_storage_put__put_record(void) {
     //Arrange
-    uint64_t file_size = 40960;
+    uint64_t file_size = 57344;
     uint64_t offset_records = 20480;
     uint64_t offset_id_idx = 24576;
-    uint64_t offset_prop1_idx = offset_id_idx + 4096;
-    uint64_t offset_string_silo = offset_prop1_idx + 4096;
+    uint64_t offset_prop1_idx = offset_id_idx + 12288;     //padded index data header + padded header + padded values & verifiers
+    uint64_t offset_string_silo = offset_prop1_idx + 12288;     //padded index data header + padded header + padded values & verifiers
 
     mmap_ptr = malloc(file_size);
     memset(mmap_ptr, 0, file_size);
@@ -143,7 +147,7 @@ void test_mos_storage_put__put_record(void) {
             .header_size = 4096,
             .attributes_size = 4096,
             .indexes_size = 4096,
-            .index_data_size = 8192,
+            .index_data_size = 24576,
             .valid_bitmap_size = 4096,
             .ready_bitmap_size = 4096,
             .string_silo_size = 4096,
@@ -193,11 +197,11 @@ void test_mos_storage_put__put_record(void) {
 
 void test_mos_storage_put__put_records(void) {
     //Arrange
-    uint64_t file_size = 40960;
+    uint64_t file_size = 57344;
     uint64_t offset_records = 20480;
     uint64_t offset_id_idx = 24576;
-    uint64_t offset_prop1_idx = offset_id_idx + 4096;
-    uint64_t offset_string_silo = offset_prop1_idx + 4096;
+    uint64_t offset_prop1_idx = offset_id_idx + 12288;
+    uint64_t offset_string_silo = offset_prop1_idx + 12288;
 
     mmap_ptr = malloc(file_size);
     memset(mmap_ptr, 0, file_size);
@@ -210,7 +214,7 @@ void test_mos_storage_put__put_records(void) {
             .header_size = 4096,
             .attributes_size = 4096,
             .indexes_size = 4096,
-            .index_data_size = 8192,
+            .index_data_size = 24576,
             .valid_bitmap_size = 4096,
             .ready_bitmap_size = 4096,
             .string_silo_size = 4096,

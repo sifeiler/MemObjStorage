@@ -20,7 +20,10 @@
 #pragma pack(push, 1)
 typedef struct mos_t_idx_hmap_header {
    uint64_t table_size;
+
+   //offset in mos_t_idx_hmap
    uint64_t offset_values;
+   //offset in mos_t_idx_hmap
    uint64_t offset_verifiers;
 } mos_idx_hmap_header;
 #pragma pack(pop)
@@ -49,7 +52,7 @@ uint64_t mos_idx_hmap_size(const uint64_t item_count, mos_t_idx* idx);
  *  sizeof(mos_t_idx_hmap_header) is a multiple of 2
  * 
  * Ensure proper alignment of:
- *  idx->offset_file is a multiple of 2
+ *  idx->index_offset is a multiple of 2
  * 
  * For performance reasons, the hash table size is doubled
  *  to keep 100% capacity at 50% utilization (linear probing).
@@ -70,10 +73,11 @@ void mos_idx_hmap_init(const uint64_t item_count, mos_t_idx* idx, mos_t_idx_data
  * @param key the value to create the hash from. Typically a unique value that identifies the indexed item.
  * @param key_len the byte length of the key
  * @param value the value stored in the hashmap. Typically a unique identifier of the indexed item (`record_row_id` in this case)
+ * @param result always NULL for hmap. No result is returned by out parameter.
  * 
  * @return -1 if hash map is full. `value` otherwise.
  */
-int64_t mos_idx_hmap_put(const mos_t_idx_data* idx_data, const uint8_t* key, const size_t key_len, const uint64_t value);
+int64_t mos_idx_hmap_put(mos_t_idx_data* idx_data, const uint8_t* key, const size_t key_len, const uint64_t value, mos_idx_put_result* result);
 
 /**
  * Creates a hash for the passed key and stores the value together with the created hash.
@@ -94,7 +98,7 @@ int64_t mos_idx_hmap_get(const mos_t_idx_data* idx_data, const uint8_t* key, con
  * @param key the value to create the actual hash from, which is used for the hash table lookup. Typically a unique value that identifies the indexed item.
  * @param key_len the byte length of the key
  */
-void mos_idx_hmap_remove(const mos_t_idx_data* idx_data, const uint8_t* key, const size_t key_len);
+void mos_idx_hmap_remove(mos_t_idx_data* idx_data, const uint8_t* key, const size_t key_len);
 
 /**
  * Searches the index data for a value and sets a 1 in the `bitmap` output parameter, for every match in the index.

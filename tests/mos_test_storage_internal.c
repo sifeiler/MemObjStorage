@@ -1,6 +1,7 @@
 #include "unity.h"
 
 #include "../include/mos_utils.h"
+#include "../include/mos_math.h"
 
 void setUp(void) {}
 void tearDown(void) {}

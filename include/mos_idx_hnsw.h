@@ -6,6 +6,7 @@
 #include <stddef.h>
 #include "mos_types_fwd.h"
 #include "mos_utils.h"
+#include "mos.h"
 
 /* =========================================================================
    1. CONSTANTS, MACROS, ENUMS
@@ -14,6 +15,7 @@
 #define MOS_IDX_HNSW_MAX_LAYERS 32      //astronomically low probability that we reach layer 32
 #define MOS_IDX_HNSW_LAYER_MARGIN_MULTIPLICATOR 5
 #define MOS_IDX_HNSW_MAX_EF_CONSTRUCTION 512
+#define MOS_IDX_HNSW_UNIFIED_SIMD_WIDTH 16      //current 
 
 typedef enum mos_idx_t_hnsw_status {
     MOS_IDX_HNSW_OK = 0,
@@ -28,39 +30,6 @@ typedef enum mos_idx_t_hnsw_status {
    ========================================================================= */
 
 #pragma pack(push, 1)
-typedef struct mos_t_idx_hnsw_graph_config {
-    //graph parameters
-    /**
-     * Caps neighbor count per node; 
-     * controls memory, graph density, and recall/speed tradeoff
-     */
-    uint16_t m;
-
-    /**
-     * Max connections allowed at layer 0.
-     * Usually set to 2*m, since layer 0 holds all nodes and benefits from denser connectivity.
-     */
-    uint16_t m_max0;
-
-    /**
-     * Controls how thoroughly candidate neighbors are searched for when wiring up a new node.
-     * Higher means a better-quality graph, leading to better recall.
-    */
-    uint16_t ef_construction;
-    
-    /**
-     * Shapes the layer hierarchy; controls how many nodes end up in upper layers
-     * Multiplying by mL scales the node distribution in the graph.
-     * mL isn't a probability itself - it's a scaling factor that controls how "stretched out" the exponential distribution is,
-     *  which in turn controls how many nodes randomly land on higher layers.
-     * Smaller mL compresses the distribution toward layer 0 (flatter hierarchy, fewer upper layers used);
-     * Larger mL stretches it out (taller hierarchy, more nodes reaching high layers).
-     */
-    float mL;
-} mos_t_idx_hnsw_graph_config;
-#pragma pack(pop)
-
-#pragma pack(push, 1)
 typedef struct mos_t_idx_arena_chunk {
     uint16_t neighbors_count;
     uint64_t neighbors[];
@@ -72,6 +41,11 @@ typedef struct mos_t_idx_hnsw_header {
     //vectors
     uint64_t vectors_offset;
     uint16_t vector_dim;
+
+    /**
+     * vector_dim rounded up to next multiple of SIMD width
+     */
+    uint64_t vector_dim_padded;
     uint8_t vector_metric;  //MOS_T_IDX_HNSW_METRIC
 
     //layer 0
@@ -84,6 +58,9 @@ typedef struct mos_t_idx_hnsw_header {
     uint64_t upper_layers_arena_chunk_stride;
     uint8_t max_layer_cap;
     uint8_t current_max_layer;
+
+    //internal_id -> external_id mapping
+    uint64_t external_ids_offset;
 
     //graph parameters
     mos_t_idx_hnsw_graph_config graph_config;
@@ -126,8 +103,8 @@ typedef struct mos_t_idx_hnsw {
 uint64_t mos_idx_hnsw_size(const uint64_t item_count, mos_t_idx* idx);
 void mos_idx_hnsw_init(const uint64_t item_count, mos_t_idx* idx, mos_t_idx_data* idx_data);
 
-int64_t mos_idx_hnsw_put(mos_t_idx_data* idx_data, const uint8_t* key, const size_t key_len, const uint64_t value);
-int64_t mos_idx_hnsw_get(mos_t_idx_data* idx_data, const uint8_t* key, const size_t key_len);
+int64_t mos_idx_hnsw_put(mos_t_idx_data* idx_data, const uint8_t* key, const size_t key_len, const uint64_t value, mos_idx_put_result* result);
+int64_t mos_idx_hnsw_get(const mos_t_idx_data* idx_data, const uint8_t* key, const size_t key_len);
 void mos_idx_hnsw_remove(mos_t_idx_data* idx_data, const uint8_t* key, const size_t key_len);
 
 /**

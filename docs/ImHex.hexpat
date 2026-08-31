@@ -56,7 +56,7 @@ enum MOS_INDEX_TYPE : u32 {
 struct mos_t_attr_info {
     char name[32];
     u32 type;
-    u64 external_offset;            // byte offset in user record
+    u64 record_offset;            // byte offset in user record
 };
 
 struct mos_t_idx {

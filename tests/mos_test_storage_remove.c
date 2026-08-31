@@ -15,9 +15,9 @@ typedef struct {
 } TestEntry;
 
 typedef struct {
-    mos_t_config storage_config;
+    mos_t_storage_config config;
     //keep attributes seperatly as otherwise the data is not available in test functions
-    mos_t_attr_info attribute_info[3];
+    mos_t_attr attributes[3];
     mos_t_idx indexes[2];
     mos_t_storage* storage;
     char file_name[256];
@@ -27,61 +27,88 @@ static CreateTestConfig test_config = {0};
 static TestEntry* result1;
 
 void setUp(void) {
-    mos_t_config storage_config = {
-        .index_count = 1,               //only one external index
-        .attribute_count = 3,
-        .max_records = 100
-    };
-    test_config.storage_config = storage_config;
+    test_config.config.attribute_count = 3;
+    test_config.config.index_count = 2;
+    test_config.config.max_records = 100;
 
-    mos_t_attr_info id = {
+    mos_t_attr id = {
         .name = "id",
-        .type = MOS_ATTR_TYPE_UINT64,
-        .external_offset = offsetof(TestEntry, id),
-        .byte_size = 8
+        .type = MOS_ATTR_TYPE_INTERNAL_UINT64,
+        .field_offset_external = offsetof(TestEntry, id),
+        .byte_size_external = 8
     };
-    mos_t_attr_info prop1 = {
+    mos_t_attr prop1 = {
         .name = "prop1",
-        .type = MOS_ATTR_TYPE_UINT64,
-        .external_offset = offsetof(TestEntry, prop1),
-        .byte_size = 8
+        .type = MOS_ATTR_TYPE_INTERNAL_UINT64,
+        .field_offset_external = offsetof(TestEntry, prop1),
+        .byte_size_external = 8
     };
-    mos_t_attr_info prop2 = {
+    mos_t_attr prop2 = {
         .name = "prop2",
-        .type = MOS_ATTR_TYPE_STRING,
-        .external_offset = offsetof(TestEntry, prop2),
+        .type = MOS_ATTR_TYPE_INTERNAL_STRING_DESC,
+        .field_offset_external = offsetof(TestEntry, prop2),
     };
-    test_config.attribute_info[0] = id;
-    test_config.attribute_info[1] = prop1;
-    test_config.attribute_info[2] = prop2;
+    test_config.attributes[0] = id;
+    test_config.attributes[1] = prop1;
+    test_config.attributes[2] = prop2;
 
     //fake internal id_idx
     mos_t_idx id_idx = {
+        .id = 0,
         .index_offset = 0,
-        .name = "id_idx",
         .type = MOS_IDX_HASH_MAP,
         .index_size = 8192,     //padded header + padded values & verifiers
-        .attribute = id
+        .attribute_name = "id"
     };
     mos_t_idx prop1_idx = {
+        .id = 1,
         .index_offset = 12288,     //padded index data header + padded header + padded values & verifiers
-        .name = "idx_prop1",
         .type = MOS_IDX_HASH_MAP,
         .index_size = 8192,     //padded header + padded values & verifiers
-        .attribute = prop1
+        .attribute_name = "prop1"
     };
     test_config.indexes[0] = id_idx;
     test_config.indexes[1] = prop1_idx;
 
-    //point test_config to global static array and not to stack (avoid dangling pointer)
-    test_config.storage_config.attributes = test_config.attribute_info;
-    test_config.storage_config.indexes = test_config.indexes;
+    test_config.config.attributes = calloc(1, sizeof(mos_t_attr) * test_config.config.attribute_count);
+    strcpy(test_config.config.attributes[0].name, "id");
+    test_config.config.attributes[0].type = MOS_ATTR_TYPE_UINT64;
+    test_config.config.attributes[0].byte_size = EXTERNAL_TYPE_SIZES[MOS_ATTR_TYPE_UINT64];
+    test_config.config.attributes[0].field_offset = offsetof(TestEntry, id);
+    test_config.config.attributes[0].indexed = 1;
+
+    strcpy(test_config.config.attributes[1].name, "prop1");
+    test_config.config.attributes[1].type = MOS_ATTR_TYPE_UINT64;
+    test_config.config.attributes[1].byte_size = EXTERNAL_TYPE_SIZES[MOS_ATTR_TYPE_UINT64];
+    test_config.config.attributes[1].field_offset = offsetof(TestEntry, prop1);
+    test_config.config.attributes[1].indexed = 1;
+
+    strcpy(test_config.config.attributes[2].name, "prop2");
+    test_config.config.attributes[2].type = MOS_ATTR_TYPE_STRING;
+    test_config.config.attributes[2].byte_size = EXTERNAL_TYPE_SIZES[MOS_ATTR_TYPE_STRING];
+    test_config.config.attributes[2].field_offset = offsetof(TestEntry, prop2);
+    test_config.config.attributes[2].indexed = 0;
+
+    test_config.config.indexes = calloc(1, sizeof(mos_t_idx) * 2);
+    strcpy(test_config.config.indexes[0].attribute_name, "id");
+    test_config.config.indexes[0].type = MOS_IDX_HASH_MAP;
+
+    strcpy(test_config.config.indexes[1].attribute_name, "prop1");
+    test_config.config.indexes[1].type = MOS_IDX_HASH_MAP;
 }
 
 void tearDown(void) {
     if(test_config.storage != NULL) {
         mos_free_storage(test_config.storage);
         test_config.storage = NULL;
+    }
+
+    if(test_config.config.attributes != NULL) {
+        free(test_config.config.attributes);
+    }
+
+    if(test_config.config.indexes != NULL) {
+        free(test_config.config.indexes);
     }
 
     // reset static struct to start clean for next test
@@ -95,8 +122,9 @@ void tearDown(void) {
 void mos_storage_remove__remove_record(void) {
     //Arrange
     strcpy(test_config.file_name, "tests/mos_storage_remove__remove_record.db");
+    strcpy(test_config.config.storage_path, "tests/mos_storage_remove__remove_record.db");
 
-    test_config.storage = mos_create_storage(test_config.file_name, &test_config.storage_config);
+    test_config.storage = mos_create_storage(test_config.file_name, &test_config.config);
 
     TestEntry entry = { .id = 1, .prop1 = 2 };
     entry.prop2.str = "entry1";

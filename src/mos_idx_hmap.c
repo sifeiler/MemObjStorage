@@ -117,7 +117,7 @@ mos_t_idx_hmap_idx_size mos_idx_hnsw_get_index_size(const uint64_t item_count, m
 }
 
 static inline mos_t_idx_hmap_ptrs mos_idx_hmap_get_data_ptrs(mos_t_idx_data* idx_data) {
-    mos_t_idx_hmap* hmap_index = ((uint8_t*)idx_data) + idx_data->header.index_payload_offset;
+    mos_t_idx_hmap* hmap_index = (mos_t_idx_hmap*)(((uint8_t*)idx_data) + idx_data->header.index_payload_offset);
     mos_t_idx_hmap_ptrs ptrs;
     ptrs.hmap = hmap_index;
     ptrs.index_values = (uint64_t*)(((uint8_t*)hmap_index) + hmap_index->index_header.offset_values);

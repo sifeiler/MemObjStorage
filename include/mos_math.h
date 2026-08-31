@@ -22,7 +22,12 @@ typedef enum MOS_T_IDX_HNSW_METRIC {
      */
     METRIC_COSINE = 1,
 
-    /**
+    /**typedef struct mos_t_attr_info {
+    char name[32];
+    MOS_ATTR_TYPE type;
+    uint64_t byte_size;
+    uint64_t record_offset;            // byte offset in user record
+} mos_t_attr_info;
      * Dot Product.
      * Measures the projection of one vector onto another.
      * Frequently used for normalized vectors.
@@ -59,6 +64,8 @@ float mos_math_euclidian_distance_squared_avx2(const float* v1, const float* v2,
 float mos_math_calc_distance(const float* v1, const float* v2, const uint16_t dimension, const MOS_T_IDX_HNSW_METRIC metric);
 
 uint16_t mos_math_calc_padded_vector_dimension(const uint16_t logical_dims);
+
+void mos_math_sanitize_and_normalize(float *vec, uint16_t dim);
 
 /* =========================================================================
    4. FUNCTION DEFINITIONS

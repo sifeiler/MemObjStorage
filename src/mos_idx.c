@@ -6,6 +6,7 @@
 #include "../include/mos_utils.h"
 #include "../include/mos_internal.h"
 #include "../include/mos_math.h"
+#include "../include/mos_qry.h"
 
 void mos_idx_init(const uint64_t record_count, mos_t_idx* idx, mos_t_idx_data* idx_data);
 
@@ -61,9 +62,9 @@ void mos_idx_create(const mos_t_storage* storage, mos_t_config* mos_config) {
         mos_t_idx_data* index_data = MOS_GET_PTR(storage->index_data, offset_index);
         index_data->header.index_payload_offset = index_data_header_size_padded;
         curr_index->index_offset = offset_index;
-        mos_idx_init(header->max_records, curr_index, index_data);
-
+        //copy the index metainformation to the index_data_header before initializing the specific index (hmap, hnsw, ...)
         memcpy(&index_data->header.index, curr_index, sizeof(mos_t_idx));
+        mos_idx_init(header->max_records, curr_index, index_data);
 
         //next index offset is old offset + the index metadata + the size of the concrete index
         offset_index += index_data_header_size_padded + curr_index->index_size;
@@ -86,6 +87,6 @@ void mos_idx_put(const MOS_IDX_TYPE idx_type, mos_t_idx_data* idx_data, const ui
     idx_ops.put(idx_data, key, key_len, value, result);
 }
 
-int64_t mos_idx_get(mos_t_idx_data* id_idx_data, uint8_t* id) {
-    return mos_idx_hmap_get(id_idx_data, id, 8);
+int64_t mos_idx_get(mos_t_idx_data* idx_data, uint8_t* id) {
+    return mos_idx_hmap_get(idx_data, id, 8);
 }

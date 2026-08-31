@@ -6,6 +6,8 @@
 #include <inttypes.h>
 #include <sys/time.h>
 #include <unistd.h> // Sometimes needed for POSIX definitions
+#include <assert.h>
+#include <string.h>
 
 #include "../include/mos.h"
 #include "../include/mos_utils.h"
@@ -21,11 +23,10 @@
    ========================================================================= */
 size_t mos_calc_bitmap_size(mos_t_config* cfg);
 size_t mos_calc_record_size(mos_t_config* cfg);
-size_t mos_calc_record_data_size(mos_t_config* cfg);
+size_t mos_calc_record_data_size_internal(mos_t_config* cfg);
 size_t mos_calc_attributes_size(mos_t_config* cfg);
 size_t mos_calc_indexes_size(mos_t_config* cfg);
 size_t mos_calc_indexes_data_size(mos_t_config* cfg);
-void mos_put_string(mos_t_storage* storage, mos_t_record* record, mos_t_attr_info* attribute, mos_t_string* str);
 void mos_free_config(mos_t_config* cfg);
 void mos_set_bit_to_zero(mos_t_qry_bmp* bitmap, uint64_t row_id);
 void mos_set_bit_to_one(mos_t_qry_bmp* bitmap, uint64_t row_id);
@@ -47,7 +48,7 @@ int mos_check_record_bounds(mos_t_header* header, uint64_t record_row_id) {
 }
 
 size_t mos_calc_attributes_size(mos_t_config* cfg) {
-    return sizeof(mos_t_attr_info) * cfg->attribute_count;
+    return sizeof(mos_t_attr) * cfg->attribute_count;
 }
 
 size_t mos_calc_indexes_size(mos_t_config* cfg) {
@@ -66,7 +67,7 @@ size_t mos_calc_indexes_data_size(mos_t_config* cfg) {
 */
 size_t mos_calc_record_size(mos_t_config* cfg) {
     size_t size = offsetof(mos_t_record, data);
-    size += mos_calc_record_data_size(cfg);
+    size += cfg->attributes_byte_size_internal;
 
     //align up to mutiple of 8 for better CPU handling.
     return MOS_ALIGN_UP(size, 8);
@@ -76,13 +77,12 @@ size_t mos_calc_record_size(mos_t_config* cfg) {
 * Iterates over all mos_t_attr_info and sums up the size of each attribute type.
 * @return size_t: size of the data of a record
 */
-size_t mos_calc_record_data_size(mos_t_config* cfg) {
+size_t mos_calc_record_data_size_internal(mos_t_config* cfg) {
     size_t size = 0;
 
     for(uint64_t i = 0; i < cfg->attribute_count; i++) {
-        mos_t_attr_info* attribute = &cfg->attributes[i];
-        //at this point, all attribute types should be valid due to prior validation
-        size += TYPE_SIZES[attribute->type];
+        mos_t_attr* attribute = &cfg->attributes[i];
+        size += attribute->byte_size_internal;
     }
 
     return size;
@@ -111,16 +111,10 @@ void mos_init_layout(mos_t_config* cfg, mos_t_layout* layout) {
     size_t indexes_size = MOS_ALIGN_UP(mos_calc_indexes_size(cfg), MOS_PAGE_SIZE);
     size_t bit_map_size = MOS_ALIGN_UP(mos_calc_bitmap_size(cfg), MOS_PAGE_SIZE);
     size_t single_record_size = mos_calc_record_size(cfg);
-    size_t record_data_size = mos_calc_record_data_size(cfg);
+    size_t record_data_size = cfg->attributes_byte_size_internal;
+    size_t record_data_size_external = cfg->attributes_byte_size_external;
     size_t total_records_size = MOS_ALIGN_UP((single_record_size * cfg->max_records), MOS_PAGE_SIZE);
     size_t index_data_size = MOS_ALIGN_UP(mos_calc_indexes_data_size(cfg), MOS_PAGE_SIZE);
-
-    size_t string_attr_count = 0;
-    for(uint64_t i = 0; i < cfg->attribute_count; i++) {
-        if(cfg->attributes[i].type == MOS_ATTR_TYPE_STRING) {
-            string_attr_count++;
-        }
-    }
 
     //set sizes
     layout->header_size = header_size;
@@ -130,11 +124,12 @@ void mos_init_layout(mos_t_config* cfg, mos_t_layout* layout) {
     layout->valid_bitmap_size = bit_map_size;
     layout->record_size = single_record_size;
     layout->record_data_size = record_data_size;
+    layout->record_data_size_external = record_data_size_external;
     layout->records_size = total_records_size;
     layout->index_data_size = index_data_size;
 
     //later implement resizing
-    uint64_t string_silo_size = MOS_AVG_STRING_LEN * string_attr_count * cfg->max_records;
+    uint64_t string_silo_size = MOS_AVG_STRING_LEN * cfg->string_attribute_count * cfg->max_records;
     // + 20%
     string_silo_size += string_silo_size * 0.2;
     layout->string_silo_size = MOS_ALIGN_UP(string_silo_size, MOS_PAGE_SIZE);
@@ -187,136 +182,281 @@ void mos_idx_id_remove(mos_t_storage* storage, uint64_t id, uint64_t record_row_
     mos_idx_remove_value(id_idx->type, id_idx_data, key_ptr, sizeof(id));
 }
 
-void mos_indexes_put(mos_t_storage* storage, uint64_t id, void* record_data, uint64_t record_row_id) {
+static inline mos_t_attr* mos_get_attribute_for_attribute_name(mos_t_attr* attributes, uint64_t attributes_count, const char* attribute_name) {
+    for(uint64_t i = 0; i < attributes_count; i++) {
+        if((strcmp(attribute_name, attributes[i].name) == 0)) {
+            return &attributes[i];
+        }
+    }
+    return NULL;
+}
+
+void mos_indexes_put(mos_t_storage* storage, uint64_t id, uint8_t* external_record_data, uint8_t* record_data_out, uint64_t record_row_id) {
     mos_t_idx* indexes = storage->indexes;
     //skip id index
     for (uint64_t i = 1; i < storage->storage_header->index_count; i++) {
         mos_t_idx* idx = indexes + i;
         mos_t_idx_data* idx_data = MOS_GET_PTR(storage->index_data, idx->index_offset);
-        mos_t_attr_info attribute = idx->attribute;
+        mos_t_attr* attribute = mos_get_attribute_for_attribute_name(storage->attributes, storage->storage_header->attribute_count, idx->attribute_name);
 
-        uint8_t* attr_base = (uint8_t*)record_data + attribute.external_offset;
-
+        uint8_t* attr_base = external_record_data + attribute->field_offset_external;
         uint32_t byte_size = 0;
-        //strings once again need special treatment.
-        //At this point, the string value should still be in the record.
-        //Later it will be replaced by the pointer to the string silo.
-        if(attribute.type == MOS_ATTR_TYPE_STRING) {
+
+        //TODO: think about a put pre-/postprocessing step for getting the index data and writing it back to the record.
+        if(attribute->type == MOS_ATTR_TYPE_INTERNAL_STRING_DESC) {
             mos_t_string* str = ((mos_t_string*)attr_base);
             byte_size = str->str_len;
             attr_base = (uint8_t*)str->str;
-        } else {
-            byte_size = attribute.byte_size;
-        }
-
-        //TODO: think about a put pre-/postprocessing step for getting the index data and writing it back to the record.
-        if(attribute.type == MOS_ATTR_TYPE_VECTOR) {
+        } else if(attribute->type == MOS_ATTR_TYPE_INTERNAL_HNSW_NODE) {
             mos_t_float_vector* vector = ((mos_t_float_vector*)attr_base);
             byte_size = vector->vector_dim * sizeof(float);
             attr_base = (uint8_t*)vector->vector;
+        } else {
+            byte_size = attribute->byte_size_external;
         }
 
-        mos_idx_put_result put_result;
-        //get the attribute value from the record. This value will be used for the index.
-        mos_idx_put(idx->type, idx_data, attr_base, byte_size, record_row_id, &put_result);
+        if(attr_base) {
+            mos_idx_put_result put_result;
+            put_result.put_result = NULL;
+            mos_idx_put(idx->type, idx_data, attr_base, byte_size, record_row_id, &put_result);
 
-        if(attribute.type == MOS_ATTR_TYPE_VECTOR) {
-            uint8_t* record_attr = (uint8_t*)record_data + attribute.external_offset;
-            //all the record remembers is the vecotrs node_id.
-            *record_attr = put_result.hnsw_node_id;
+            if(put_result.put_result) {
+                uint8_t* internal_record_attr = record_data_out + attribute->field_offset_internal;
+                assert(put_result.byte_size == attribute->byte_size_internal && "Result of mos_idx_put is incorrectly sized for the record.");
+                memcpy(internal_record_attr, put_result.put_result, attribute->byte_size_internal);
+                free(put_result.put_result);
+                put_result.put_result = NULL;   // defensive — avoid any accidental reuse/double-free further down
+            }
         }
     }
     mos_idx_id_put(storage, id, record_row_id);
 }
 
-void mos_put_internal(mos_t_storage* storage, uint64_t id, void* record_data, uint64_t record_row_id) {
-    mos_t_record* record = (mos_t_record*)MOS_GET_PTR(storage->entries, record_row_id * storage->storage_header->layout.record_size);
+void mos_put_internal(mos_t_storage* storage, uint64_t id, void* external_record_data, uint64_t record_row_id) {
     mos_t_header* header = storage->storage_header;
+    uint64_t record_size = header->layout.record_size;
 
+    //record is no longer valid for search etc.
     mos_set_bit_to_zero(storage->valid_bitmap, record_row_id);
-    record->id = id;
 
-    //record not yet valid, but ok to copy already because valid_bitmap informs about it
-    memcpy(record->data, record_data, header->layout.record_data_size);
-
-    mos_indexes_put(storage, id, record->data, record_row_id);
+    uint8_t record_buffer[record_size];
+    memset(record_buffer, 0, record_size);
+    mos_t_record* record_buffer_ptr = (mos_t_record*)record_buffer;
+    record_buffer_ptr->id = id;
+    uint8_t* record_buffer_data_ptr = record_buffer_ptr->data;
 
     //check if any attributes need special treatment
     for(uint64_t i = 0; i < header->attribute_count; i++) {
-        mos_t_attr_info attribute = storage->attributes[i];
-        //put_string has to happen after mos_indexes_put
-        if(attribute.type == MOS_ATTR_TYPE_STRING) {
-            mos_t_string* str = (mos_t_string*)(record->data + attribute.external_offset);
-            mos_put_string(storage, record, &attribute, str);
+        mos_t_attr* attribute = &storage->attributes[i];
+
+        //vectors are exclusively handled via mos_indexes_put (HNSW is mandatory for them)
+        if(attribute->type == MOS_ATTR_TYPE_INTERNAL_HNSW_NODE) {
+            continue;
+        }
+        
+        uint8_t* external_attr = ((uint8_t*)external_record_data) + attribute->field_offset_external;
+        uint8_t* internal_attr = record_buffer_data_ptr + attribute->field_offset_internal;
+
+        if(attribute->type == MOS_ATTR_TYPE_INTERNAL_STRING_DESC) {
+            mos_t_string* str = (mos_t_string*)external_attr;
+            mos_t_string_desc str_out;
+            mos_string_put(storage->string_silo_base, &storage->storage_header->string_silo, str, &str_out);
+            memcpy(internal_attr, &str_out, attribute->byte_size_internal);
+        } else {
+            //plain scalar — always a direct copy, indexed or not
+            memcpy(internal_attr, external_attr, attribute->byte_size_internal);
         }
     }
+    mos_indexes_put(storage, id, (uint8_t*)external_record_data, record_buffer_data_ptr, record_row_id);
 
-    record->flags = 0;
-    record->timestamp = mos_get_current_time_millis();
+    record_buffer_ptr->flags = 0;
+    record_buffer_ptr->timestamp = mos_get_current_time_millis();
 
+    mos_t_record* record_storage = (mos_t_record*)MOS_GET_PTR(storage->entries, record_row_id * record_size);
+    memcpy(record_storage, record_buffer, record_size);
+
+    //record is valid for search etc.
     mos_set_bit_to_one(storage->valid_bitmap, record_row_id);
-}
-
-/*
-------------    |
-------------    |
-------------    |
-------------    |
-index1index2    v
-------------    ^
---------str4    |
-str3str2str1    |
-*/
-void mos_put_string(mos_t_storage* storage, mos_t_record* record, mos_t_attr_info* attribute, mos_t_string* str) {
-    //mos_t_string_desc* str_desc = (mos_t_string_desc*)(record->data + attribute->external_offset);
-    // Put the string descriptor at the exact same position where the actual string was stored in the record. 
-    //  This is neccessary to get fixed size records. The actual string is moved into the string silo by mos_string_put.
-    //  TODO: Do not use the same pointer for both, the actual string and the string descriptor, 
-    //        as this can go horribly wrong if mos_string_put writes at the descriptor address before coping the actual string from the address.
-    mos_string_put(storage->string_silo_base, &storage->storage_header->string_silo, str, (mos_t_string_desc*)str);
 }
 
 /* =========================================================================
    3. Header Function DEFINITIONS
    ========================================================================= */
 
-mos_t_config* mos_init_internal_config(mos_t_config* external_cfg) {
+mos_t_config* mos_init_internal_config(mos_t_storage_config* external_cfg) {
     mos_t_config* internal_cfg = calloc(1, sizeof(mos_t_config));
 
-    mos_t_attr_info* attributes = calloc(external_cfg->attribute_count, sizeof(mos_t_attr_info));
+    if(!internal_cfg) {
+        mos_utils_report_error("Allocation error. mos_t_storage_config cannot be allocated. Cannot initialize internal config.");
+        return NULL;
+    }
+
+    mos_t_attr* internal_attributes = calloc(external_cfg->attribute_count, sizeof(mos_t_attr));
+    if(!internal_attributes) {
+        free(internal_cfg);
+        mos_utils_report_error("Allocation error. mos_t_attr_internal cannot be allocated. Cannot initialize internal config.");
+        return NULL;
+    }
+
     //+1 for the fixed id index. Every record has an id.
     mos_t_idx* indexes = calloc(external_cfg->index_count + 1, sizeof(mos_t_idx));
-    *internal_cfg = *external_cfg;
+    if(!indexes) {
+        free(internal_cfg);
+        free(internal_attributes);
+        mos_utils_report_error("Allocation error. mos_t_idx cannot be allocated. Cannot initialize internal config.");
+        return NULL;
+    }
 
-    internal_cfg->attributes = attributes;
+    uint64_t actual_attributes_count = 0;
+    uint64_t actual_indexes_count = 0;
+    uint64_t attribute_offset = 0;
+    uint64_t total_attribute_byte_size_internal = 0;
+
+    //id index
+    mos_t_idx* id_index = &indexes[0];
+    id_index->id = 0;
+    id_index->type = MOS_IDX_HASH_MAP;
+    strncpy(id_index->attribute_name, "id", MOS_ATTR_NAME_LENGTH - 2);
+    id_index->attribute_name[MOS_ATTR_NAME_LENGTH - 1] = '\0';
+    id_index->index_offset = 0;
+    actual_indexes_count++;
+
+    for(uint64_t i = 0; i < external_cfg->attribute_count; i++) {
+        mos_t_attr_config external_attribute = external_cfg->attributes[i];
+        mos_t_attr* internal_attribute = &internal_attributes[i];
+
+        if(external_attribute.indexed) {
+            if(actual_indexes_count == (external_cfg->index_count + 1)) {
+                //too many indexes
+                mos_utils_report_error("Invalid mos_t_config. Surpassing expected index_count.");
+                return NULL;
+            }
+
+            mos_t_idx_config* attr_idx_config = NULL;
+            for(uint64_t j = 0; j < external_cfg->index_count; j++) {
+                mos_t_idx_config* idx_config = &external_cfg->indexes[j];
+                if(strncmp(external_attribute.name, idx_config->attribute_name, strlen(external_attribute.name)) == 0) {
+                    attr_idx_config = idx_config;
+                    break;
+                }
+            }
+            if(!attr_idx_config) {
+                //attribute should be indexed but index configuration is missing -> invalid configuration
+                mos_utils_report_error("Invalid mos_t_config. Missing index configuration for attribute %s", external_attribute.name);
+                return NULL;
+            }
+            
+            mos_t_idx* index = &indexes[actual_indexes_count];
+            strncpy(index->attribute_name, external_attribute.name, MOS_ATTR_NAME_LENGTH - 2);
+            index->attribute_name[MOS_ATTR_NAME_LENGTH - 1] = '\0';
+            index->type = attr_idx_config->type;
+            memcpy(&index->params, &attr_idx_config->params, sizeof(index->params));
+            index->id = actual_indexes_count++;
+            internal_attribute->indexed = 1;
+        }
+
+        MOS_ATTR_TYPE_INTERNAL attr_type_internal = MOS_ATTR_EXTERNAL_INTERNAL_MAPPING[external_attribute.type];
+
+        internal_attribute->byte_size_external = external_attribute.byte_size;
+        internal_attribute->byte_size_internal = INTERNAL_TYPE_SIZES[attr_type_internal];
+        total_attribute_byte_size_internal += internal_attribute->byte_size_internal;
+
+        if(external_attribute.type == MOS_ATTR_TYPE_STRING) {
+            internal_cfg->string_attribute_count++;
+        }
+
+        internal_attribute->field_offset_external = external_attribute.field_offset;
+        internal_attribute->field_offset_internal = attribute_offset;
+        internal_attribute->type = attr_type_internal;
+        strncpy(internal_attribute->name, external_attribute.name, MOS_ATTR_NAME_LENGTH - 2);
+        internal_attribute->name[MOS_ATTR_NAME_LENGTH - 1] = '\0';
+        attribute_offset += internal_attribute->byte_size_internal;
+        actual_attributes_count++;
+    }
+
+    internal_cfg->attributes_byte_size_external = external_cfg->padded_record_byte_size;
+    internal_cfg->attributes_byte_size_internal = total_attribute_byte_size_internal;
+    internal_cfg->attributes = internal_attributes;
     internal_cfg->indexes = indexes;
-    internal_cfg->index_count = external_cfg->index_count + 1;
-
-    strncpy(indexes->name, "idx_id", 31);
-    indexes->name[31] = '\0';
-    indexes->type = MOS_IDX_HASH_MAP;
-    strncpy(indexes->attribute.name, "id", 31);
-    indexes->attribute.name[31] = '\0';
-
-    indexes->attribute.type = MOS_ATTR_TYPE_UINT64;
-    indexes->attribute.byte_size = 8;
-    indexes->attribute.external_offset = MOS_NULL_OFFSET;
-
-    memcpy(internal_cfg->attributes, external_cfg->attributes, sizeof(mos_t_attr_info) * external_cfg->attribute_count);
-    memcpy(internal_cfg->indexes + 1, external_cfg->indexes, sizeof(mos_t_idx) * external_cfg->index_count);
+    internal_cfg->attribute_count = actual_attributes_count;
+    internal_cfg->index_count = actual_indexes_count;
+    internal_cfg->max_records = external_cfg->max_records;
+    internal_cfg->storage_path = external_cfg->storage_path;
 
     return internal_cfg;
 }
 
-int mos_validate_config(mos_t_config* cfg) {
+int mos_validate_config(mos_t_storage_config* cfg) {
     if(cfg == NULL) {
         mos_utils_report_error("mos_t_config is NULL. mos_t_config is invalid.");
         return INVALID;
     }
 
-    if(cfg->max_records <= 0) {
-        mos_utils_report_error("mos_t_config->max_records is <= 0. mos_t_config is invalid.");
+    if(cfg->max_records == 0) {
+        mos_utils_report_error("mos_t_config->max_records is 0. mos_t_config is invalid.");
         return INVALID;
+    }
+
+    if(cfg->attribute_count == 0) {
+        mos_utils_report_error("mos_t_config->attribute_count is 0. mos_t_config is invalid.");
+        return INVALID;
+    }
+
+    if(*cfg->storage_path == '\0') {
+        mos_utils_report_error("mos_t_config->storage_path is 0. mos_t_config is invalid.");
+        return INVALID;
+    }
+
+    for(uint64_t i = 0; i < cfg->attribute_count; i++) {
+        mos_t_attr_config attribute = cfg->attributes[i];
+
+        if(attribute.name[0] == '\0') {
+            mos_utils_report_error("attribute name is not set. mos_t_config is invalid.");
+            return INVALID;
+        }
+
+        if(attribute.byte_size == 0) {
+            mos_utils_report_error("attribute byte_size is 0. mos_t_config is invalid.");
+            return INVALID;
+        }
+
+        if(attribute.type < MOS_ATTR_MIN || attribute.type >= MOS_ATTR_MAX) {
+            mos_utils_report_error("attribute type is invalid. mos_t_config is invalid.");
+            return INVALID;
+        }
+
+        if(attribute.indexed) {
+            mos_t_idx_config* attr_idx_config = NULL;
+            for(uint64_t j = 0; j < cfg->index_count; j++) {
+                mos_t_idx_config* idx_config = &cfg->indexes[j];
+                if(strncmp(attribute.name, idx_config->attribute_name, strlen(attribute.name)) == 0) {
+                    attr_idx_config = idx_config;
+                    break;
+                }
+            }
+            if(!attr_idx_config) {
+                //attribute should be indexed but index configuration is missing -> invalid configuration
+                mos_utils_report_error("Invalid mos_t_config. Missing index configuration for attribute %s", attribute.name);
+                return INVALID;
+            }
+            if(!mos_attr_supports_index(attribute.type, attr_idx_config->type)) {
+                //attribute should be indexed but provided index is not compatible with attribute type -> invalid configuration
+                mos_utils_report_error("Invalid mos_t_config. Index %s not compatible with attribute %s", MOS_IDX_TYPE_NAMES[attr_idx_config->type], attribute.name);
+                return INVALID;
+            }
+        }
+
+        for(uint64_t j = 0; j < i; j++) {
+            mos_t_attr_config attribute2 = cfg->attributes[j];
+            uint64_t start_1 = attribute.field_offset;
+            uint64_t start_2 = attribute2.field_offset;
+            uint64_t end_1 = attribute.field_offset + attribute.byte_size;
+            uint64_t end_2 = attribute2.field_offset + attribute2.byte_size;
+            if(start_1 < end_2 && start_2 < end_1) {
+                mos_utils_report_error("Invalid mos_t_config. Attributes %s and %s are overlapping", attribute.name, attribute2.name);
+                return INVALID;
+            }
+        }
     }
 
     return VALID;
@@ -406,16 +546,20 @@ void mos_free_storage_config(mos_t_config* cfg) {
     free(cfg);
 }
 
-mos_t_storage* mos_create_storage(const char* file_path, mos_t_config* external_cfg) {
+mos_t_storage* mos_create_storage(const char* file_path, mos_t_storage_config* external_cfg) {
     if(file_path == NULL) {
         mos_utils_report_error("Invalid argument file_path = NULL. Cannot create storage file.");
         return NULL;
     }
     
-    mos_t_config* internal_cfg = mos_init_internal_config(external_cfg);
-
-    if(mos_validate_config(internal_cfg) == INVALID) {
+    if(mos_validate_config(external_cfg) == INVALID) {
         mos_utils_report_error("Invalid mos_t_config. Cannot create storage file.");
+        return NULL;
+    }
+    
+    mos_t_config* internal_cfg = mos_init_internal_config(external_cfg);
+    if(!internal_cfg) {
+        mos_utils_report_error("Cannot create storage: internal config initialization failed.");
         return NULL;
     }
 
@@ -474,7 +618,7 @@ mos_t_storage* mos_create_storage(const char* file_path, mos_t_config* external_
     storage_state->last_deleted_row_id = MOS_NULL_OFFSET;
 
     //writing storage attributes to file
-    memcpy(storage->attributes, internal_cfg->attributes, sizeof(mos_t_attr_info) * internal_cfg->attribute_count);
+    memcpy(storage->attributes, internal_cfg->attributes, sizeof(mos_t_attr) * internal_cfg->attribute_count);
 
     mos_idx_create(storage, internal_cfg);
 
@@ -569,26 +713,55 @@ const mos_t_record* mos_storage_get_record(mos_t_storage* storage, uint64_t id) 
     return NULL;
 }
 
+/**
+ * Reconstructs the user defined record from an internal record.
+ * Strings are fetched from the string silo.
+ * Vectors are fetched from the hnsw index.
+ * ...
+ */
+const uint8_t* mos_storage_construct_external_record(mos_t_storage* storage, mos_t_record* internal_record) {
+    mos_t_header* header = storage->storage_header;
+    mos_t_layout layout = header->layout;
+    uint8_t* external_record = malloc(layout.record_data_size_external);
+    for (size_t i = 0; i < header->attribute_count; i++)
+    {
+        mos_t_attr attribute = storage->attributes[i];
+        uint8_t* internal_attr_data = MOS_GET_PTR(internal_record->data, attribute.field_offset_internal);
+        
+        uint8_t data_buffer[attribute.byte_size_external];
+        switch (attribute.type) {
+            case MOS_ATTR_TYPE_INTERNAL_STRING_DESC: {
+                mos_t_string_desc* sd = (mos_t_string_desc*)internal_attr_data;
+                mos_t_string* dest_string = (mos_t_string*)data_buffer;
+                mos_storage_get_string(storage, sd, &dest_string->str);
+                dest_string->str_len = sd->str_len;
+                break;
+            }
+            //TODO: return vector for hnsw node id in record
+            case MOS_ATTR_TYPE_INTERNAL_HNSW_NODE: {
+                uint64_t hnsw_node_id;
+                memcpy(&hnsw_node_id, internal_attr_data, sizeof(hnsw_node_id));
+                //TODO: get vector and put it into external_record
+                //mos_t_float_vector* dest_vector = (mos_t_float_vector*)data_buffer;
+                //mos_idx_hnsw_get(idx, &attribute, node_desc, &dest_vector->vector);
+                //dest_vector->vector_dim = header->/* vector_dim wherever stored */;
+                break;
+            }
+            default:
+                memcpy(data_buffer, internal_attr_data, sizeof(data_buffer));
+        }
+        memcpy(external_record + attribute.field_offset_external, data_buffer, sizeof(data_buffer));
+    }
+    return external_record;
+}
+
 const void* mos_storage_get_data_for_row_id(mos_t_storage* storage, uint64_t row_id) {
     mos_t_header* header = storage->storage_header;
 
     //there is no need to get full record if it is not valid
     if(row_id >= 0 && mos_get_bit_at_row_id(storage->valid_bitmap, row_id)) {
-        uint8_t* record_payload = malloc(header->layout.record_data_size);
         mos_t_record* record = MOS_GET_PTR(storage->entries, row_id * header->layout.record_size);
-        memcpy(record_payload, record->data, header->layout.record_data_size);
-        for (size_t i = 0; i < header->attribute_count; i++)
-        {
-            mos_t_attr_info attribute = storage->attributes[i];
-            //strings need special treatment
-            if(attribute.type == MOS_ATTR_TYPE_STRING) {
-                mos_t_string_desc sd = *(mos_t_string_desc*)MOS_GET_PTR(record->data, attribute.external_offset);
-                mos_t_string* dest_string = (mos_t_string*)(record_payload + attribute.external_offset);
-                mos_storage_get_string(storage, &sd, &dest_string->str);
-                dest_string->str_len = sd.str_len;
-            }
-        }
-        return record_payload;
+        return mos_storage_construct_external_record(storage, record);
     }
     return NULL;
 }
@@ -625,7 +798,7 @@ void mos_storage_remove(mos_t_storage* storage, uint64_t id) {
     }
 
     //records are at least 64 bits
-    uint8_t* record = MOS_GET_PTR(storage->entries, record_row_id * header->layout.record_size);
+    mos_t_record* record = MOS_GET_PTR(storage->entries, record_row_id * header->layout.record_size);
     //invalidate record
     mos_set_bit_to_zero(storage->valid_bitmap, record_row_id);
 
@@ -635,8 +808,10 @@ void mos_storage_remove(mos_t_storage* storage, uint64_t id) {
         mos_t_idx* index = indexes + i;
         mos_t_idx_data* index_data = MOS_GET_PTR(storage->index_data, index->index_offset);
 
-        uint8_t* key = record + offsetof(mos_t_record, data) + index->attribute.external_offset;
-        size_t key_len = index->attribute.byte_size;
+        //TODO: Rework remove. Key might not match for every index.
+        mos_t_attr* attribute = mos_get_attribute_for_attribute_name(storage->attributes, header->attribute_count, index->attribute_name);
+        uint8_t* key = record->data + attribute->field_offset_internal;
+        size_t key_len = attribute->byte_size_internal;
         mos_idx_remove_value(index->type, index_data, key, key_len);
     }
     mos_idx_id_remove(storage, id, record_row_id);

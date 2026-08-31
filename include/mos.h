@@ -16,29 +16,46 @@
    CONSTANTS, MACROS, ENUMS
    ========================================================================= */
 
-typedef enum MOS_IDX_TYPE { MOS_IDX_HASH_MAP, MOS_IDX_HNSW } MOS_IDX_TYPE;
+#define MOS_ATTR_NAME_LENGTH 32
 
-//TODO: give integers to enum values and store integers anywhere the enum is used.
+typedef enum MOS_IDX_TYPE { 
+    MOS_IDX_HASH_MAP = 1 << 0, 
+    MOS_IDX_HNSW = 1 << 1
+} MOS_IDX_TYPE;
+
+// Only store integers anywhere the enum is used.
 // Otherwise it might get messy due to different compilers and mmapping.
 typedef enum MOS_ATTR_TYPE {
-    MOS_ATTR_TYPE_UINT64,
-    MOS_ATTR_TYPE_TIMESTAMP,
-    MOS_ATTR_TYPE_STRING,
-    MOS_ATTR_TYPE_VECTOR
+    MOS_ATTR_MIN = 0,
+
+    MOS_ATTR_TYPE_UINT64 = 0,
+    MOS_ATTR_TYPE_TIMESTAMP = 1,
+    MOS_ATTR_TYPE_STRING = 2,
+    MOS_ATTR_TYPE_VECTOR = 3,
+    MOS_ATTR_MAX
 } MOS_ATTR_TYPE;
 
-#pragma pack(push, 1)
-typedef struct mos_t_attr_info {
-    char name[32];
-    MOS_ATTR_TYPE type;
+typedef struct mos_t_attr_config {
     uint64_t byte_size;
-    uint64_t external_offset;            // byte offset in user record
-} mos_t_attr_info;
-#pragma pack(pop)
+    uint64_t field_offset;                 // byte offset in user provided struct
+    char name[MOS_ATTR_NAME_LENGTH];
+    uint8_t type;                          // MOS_ATTR_TYPE
+    uint8_t indexed;
+    uint8_t  _pad[2];
+} mos_t_attr_config;
 
-#pragma pack(push, 1)
 typedef struct mos_t_idx_hnsw_graph_config {
     //graph parameters
+    /**
+     * Shapes the layer hierarchy; controls how many nodes end up in upper layers
+     * Multiplying by mL scales the node distribution in the graph.
+     * mL isn't a probability itself - it's a scaling factor that controls how "stretched out" the exponential distribution is,
+     *  which in turn controls how many nodes randomly land on higher layers.
+     * Smaller mL compresses the distribution toward layer 0 (flatter hierarchy, fewer upper layers used);
+     * Larger mL stretches it out (taller hierarchy, more nodes reaching high layers).
+     */
+    float mL;
+
     /**
      * Caps neighbor count per node; 
      * controls memory, graph density, and recall/speed tradeoff
@@ -56,56 +73,44 @@ typedef struct mos_t_idx_hnsw_graph_config {
      * Higher means a better-quality graph, leading to better recall.
     */
     uint16_t ef_construction;
-    
-    /**
-     * Shapes the layer hierarchy; controls how many nodes end up in upper layers
-     * Multiplying by mL scales the node distribution in the graph.
-     * mL isn't a probability itself - it's a scaling factor that controls how "stretched out" the exponential distribution is,
-     *  which in turn controls how many nodes randomly land on higher layers.
-     * Smaller mL compresses the distribution toward layer 0 (flatter hierarchy, fewer upper layers used);
-     * Larger mL stretches it out (taller hierarchy, more nodes reaching high layers).
-     */
-    float mL;
+
+    uint8_t  _pad[6];
 } mos_t_idx_hnsw_graph_config;
-#pragma pack(pop)
 
-#pragma pack(push, 1)
 typedef struct mos_t_idx_params_hnsw {
-    uint64_t vector_dim;    //the logical vector dimension
-    uint8_t vector_metric;  //MOS_T_IDX_HNSW_METRIC
-    mos_t_idx_hnsw_graph_config graph_config;
+    mos_t_idx_hnsw_graph_config graph_config;   // 8 byte aligned
+    uint64_t vector_dim;    // the logical vector dimension
+    uint8_t vector_metric;  // MOS_T_IDX_HNSW_METRIC
+    uint8_t _pad[7];
 } mos_t_idx_params_hnsw;
-#pragma pack(pop)
 
-#pragma pack(push, 1)
-typedef struct mos_t_idx {
-    char name[32];
-    MOS_IDX_TYPE type;
-    uint64_t index_offset;  // offset in index_data section (first index has offset 0)
-    uint64_t index_size;    // bytes occupied in the storage file
-    mos_t_attr_info attribute;
+typedef struct mos_t_idx_config {
+    char attribute_name[MOS_ATTR_NAME_LENGTH];
+    uint8_t type;              // MOS_IDX_TYPE
 
     //optional parameters that are to be selected based on field `type`
     union {
         mos_t_idx_params_hnsw hnsw;
     } params;
-} mos_t_idx;
-#pragma pack(pop)
+} mos_t_idx_config;
 
-typedef struct mos_t_config {
+typedef struct mos_t_storage_config {
     uint64_t max_records;
-    mos_t_attr_info* attributes;
-    mos_t_idx* indexes;
     uint64_t index_count;
     uint64_t attribute_count;
-    char* storage_path;
-} mos_t_config;
+    uint64_t padded_record_byte_size;
 
-typedef struct mos_t_config mos_t_config;
+    mos_t_attr_config* attributes;
+    mos_t_idx_config* indexes;
+    char storage_path[256];
+} mos_t_storage_config;
+
 typedef struct mos_t_storage mos_t_storage;
 typedef struct mos_t_qry mos_t_qry;
 typedef struct mos_t_qry_bmp mos_t_qry_bmp;
 typedef struct mos_t_idx_hnsw_graph_config mos_t_idx_hnsw_graph_config;
+typedef struct mos_t_float_vector mos_t_float_vector;
+typedef struct mos_t_string mos_t_string;
 
 /* =========================================================================
    FUNCTION DECLARATIONS
@@ -116,7 +121,7 @@ typedef struct mos_t_idx_hnsw_graph_config mos_t_idx_hnsw_graph_config;
 * @see mos_create_storage(char*, mos_t_config*)
 * @return return 1 -> valid, 0 -> invalid
 */
-int mos_validate_config(mos_t_config* mos_config);
+int mos_validate_config(mos_t_storage_config* mos_config);
 
 /**
  * Creates a mos_t_storage instance.
@@ -127,7 +132,7 @@ int mos_validate_config(mos_t_config* mos_config);
  * @param mos_config the configuration i.e. attributes, indexes etc.
  * @return pointer to a mos_t_storage instance, fully configured and ready to use.
  */
-mos_t_storage* mos_create_storage(const char* file_path, mos_t_config* mos_config);
+mos_t_storage* mos_create_storage(const char* file_path, mos_t_storage_config* mos_config);
 
 /**
  * Loads the file and initializes a storage instance from it.

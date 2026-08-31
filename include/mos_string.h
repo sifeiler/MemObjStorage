@@ -38,28 +38,23 @@ string1.........OUTOFSILO
 
 */
 
-#pragma pack(push, 1)
 typedef struct mos_t_string {
     char* str;
     uint32_t str_len;
 } mos_t_string;
-#pragma pack(pop)
 
-#pragma pack(push, 1)
 typedef struct mos_t_string_desc {
     uint64_t str_offset;               //the offset of the string start (so str_len included) from base + size 
     uint32_t str_len;
 } mos_t_string_desc;
-#pragma pack(pop)
 
-#pragma pack(push, 1)
 typedef struct mos_t_string_silo {
     uint64_t base_offset;              //the silo base offset from file top. Writing will start at base + size and grow towards base.
     uint64_t size;
     uint64_t current_offset;
-    mos_t_string_desc last_deleted;
+    mos_t_string_desc last_deleted;    // 4-byte aligned
+    uint8_t _pad[4];
 } mos_t_string_silo;
-#pragma pack(pop)
 
 #define MOS_MIN_STRING_ALLOC 16         // must stay a power of two AND >= sizeof(mos_t_string_desc)
 #define DELETED_NODE_SIZE sizeof(mos_t_string_desc)

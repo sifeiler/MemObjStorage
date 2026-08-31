@@ -11,14 +11,13 @@
 #include "../include/mos_math.h"
 
 typedef struct {
-    uint64_t id;
     uint64_t prop1;
     mos_t_string prop2;
 } TestEntry;
 
 typedef struct {
     //keep attributes seperatly as otherwise the data is not available in test functions
-    mos_t_attr_info attribute_info[3];
+    mos_t_attr attributes[2];
     mos_t_idx indexes[2];
     mos_t_storage* storage;
 } CreateTestConfig;
@@ -32,37 +31,40 @@ static TestEntry* result4;
 static void* mmap_ptr;
 
 void setUp(void) {
-    mos_t_attr_info id = {
-        .name = "id",
-        .type = MOS_ATTR_TYPE_UINT64,
-        .external_offset = offsetof(TestEntry, id)
-    };
-    mos_t_attr_info prop1 = {
+    mos_t_attr prop1 = {
         .name = "prop1",
-        .type = MOS_ATTR_TYPE_UINT64,
-        .external_offset = offsetof(TestEntry, prop1)
+        .type = MOS_ATTR_TYPE_INTERNAL_UINT64,
+        .field_offset_external = offsetof(TestEntry, prop1),
+        .field_offset_internal = 0,
+        .byte_size_external = EXTERNAL_TYPE_SIZES[MOS_ATTR_TYPE_UINT64],
+        .byte_size_internal = INTERNAL_TYPE_SIZES[MOS_ATTR_TYPE_INTERNAL_UINT64],
+        .indexed = 1
     };
-    mos_t_attr_info prop2 = {
+    mos_t_attr prop2 = {
         .name = "prop2",
-        .type = MOS_ATTR_TYPE_STRING,
-        .external_offset = offsetof(TestEntry, prop2)
+        .type = MOS_ATTR_TYPE_INTERNAL_STRING_DESC,
+        .field_offset_external = offsetof(TestEntry, prop2),
+        .field_offset_internal = prop1.byte_size_internal,
+        .byte_size_external = EXTERNAL_TYPE_SIZES[MOS_ATTR_TYPE_STRING],
+        .byte_size_internal = INTERNAL_TYPE_SIZES[MOS_ATTR_TYPE_INTERNAL_STRING_DESC],
+        .indexed = 0
     };
-    test_config.attribute_info[0] = id;
-    test_config.attribute_info[1] = prop1;
-    test_config.attribute_info[2] = prop2;
+    test_config.attributes[0] = prop1;
+    test_config.attributes[1] = prop2;
 
-    //fake internal id_idx
     mos_t_idx id_idx = {
+        .id = 0,
         .index_offset = 0,
-        .name = "id_idx",
         .type = MOS_IDX_HASH_MAP,
-        .index_size = 8192     //padded header + padded values & verifiers
+        .index_size = 8192,     //padded header + padded values & verifiers
+        .attribute_name = "id"
     };
     mos_t_idx prop1_idx = {
+        .id = 1,
         .index_offset = 12288,     //padded index data header + padded header + padded values & verifiers
-        .name = "idx_prop1",
         .type = MOS_IDX_HASH_MAP,
-        .index_size = 8192     //padded header + padded values & verifiers
+        .index_size = 8192,     //padded header + padded values & verifiers
+        .attribute_name = "prop1"
     };
     test_config.indexes[0] = id_idx;
     test_config.indexes[1] = prop1_idx;
@@ -103,8 +105,8 @@ mos_t_storage setup_test_storage(void* memory, mos_t_header* h) {
 
     uint8_t* base = (uint8_t*)memory;
 
-    storage.attributes = (mos_t_attr_info*)&base[h->layout.offset_attributes];
-    memcpy(storage.attributes, test_config.attribute_info, h->attribute_count * sizeof(mos_t_attr_info));
+    storage.attributes = (mos_t_attr*)&base[h->layout.offset_attributes];
+    memcpy(storage.attributes, test_config.attributes, h->attribute_count * sizeof(mos_t_attr));
     storage.indexes = (mos_t_idx*)(base + h->layout.offset_indexes);
     memcpy(storage.indexes, test_config.indexes, h->index_count * sizeof(mos_t_idx));
 
@@ -115,7 +117,7 @@ mos_t_storage setup_test_storage(void* memory, mos_t_header* h) {
     storage.ready_bitmap = (mos_t_qry_bmp*)(base + h->layout.offset_ready_bitmap);
     storage.string_silo_base = (void*)(base + h->layout.offset_string_silo);
 
-    for (int i = 0; i < h->index_count; i++) {
+    for (uint64_t i = 0; i < h->index_count; i++) {
         uint8_t* idx_page = ((uint8_t*)storage.index_data) + (i * 12288);     //i * (padded index data header + padded header + padded values & verifiers)
         mos_t_idx_data* idx_data = (mos_t_idx_data*)idx_page;
         idx_data->header.index_payload_offset = MOS_ALIGN_UP(sizeof(mos_t_idx_data_header), MOS_PAGE_SIZE);
@@ -141,7 +143,7 @@ void test_mos_storage_put__put_record(void) {
 
     mos_t_header header = {
         .index_count = 2,
-        .attribute_count = 3,
+        .attribute_count = 2,
         .max_records = 4,
         .layout = {
             .header_size = 4096,
@@ -178,7 +180,7 @@ void test_mos_storage_put__put_record(void) {
     };    
     mos_t_storage storage = setup_test_storage(mmap_ptr, &header);
 
-    TestEntry entry = { .id = 1, .prop1 = 2 };
+    TestEntry entry = { .prop1 = 2 };
     entry.prop2.str = "entry1";
     entry.prop2.str_len = 6;
 
@@ -189,7 +191,6 @@ void test_mos_storage_put__put_record(void) {
     result1 = (TestEntry*)mos_storage_get(&storage, id1); // Get first slot
     
     //Assert
-    TEST_ASSERT_EQUAL_INT64(1, result1->id);
     TEST_ASSERT_EQUAL_INT64(2, result1->prop1);
     TEST_ASSERT_EQUAL_STRING_LEN("entry1", result1->prop2.str, result1->prop2.str_len);
     TEST_ASSERT_EQUAL_INT(6, result1->prop2.str_len);
@@ -208,7 +209,7 @@ void test_mos_storage_put__put_records(void) {
 
     mos_t_header header = {
         .index_count = 2,
-        .attribute_count = 3,
+        .attribute_count = 2,
         .max_records = 4,
         .layout = {
             .header_size = 4096,
@@ -244,10 +245,10 @@ void test_mos_storage_put__put_records(void) {
     };    
     mos_t_storage storage = setup_test_storage(mmap_ptr, &header);
 
-    TestEntry entry = { .id = 1, .prop1 = 2 };
+    TestEntry entry = { .prop1 = 2 };
     entry.prop2.str = "entry1";
     entry.prop2.str_len = 6;
-    TestEntry entry2 = { .id = 11, .prop1 = 20 };
+    TestEntry entry2 = { .prop1 = 20 };
     entry2.prop2.str = "entry11";
     entry2.prop2.str_len = 7;
 
@@ -261,19 +262,16 @@ void test_mos_storage_put__put_records(void) {
     result2 = (TestEntry*)mos_storage_get(&storage, id11);
 
     //Assert
-    TEST_ASSERT_EQUAL_INT64(1, result1->id);
     TEST_ASSERT_EQUAL_INT64(2, result1->prop1);
     TEST_ASSERT_EQUAL_STRING_LEN("entry1", result1->prop2.str, result1->prop2.str_len);
     TEST_ASSERT_EQUAL_INT(6, result1->prop2.str_len);
 
-    TEST_ASSERT_EQUAL_INT64(11, result2->id);
     TEST_ASSERT_EQUAL_INT64(20, result2->prop1);
     TEST_ASSERT_EQUAL_STRING_LEN("entry11", result2->prop2.str, result2->prop2.str_len);
     TEST_ASSERT_EQUAL_INT(7, result2->prop2.str_len);
 }
 
 void print_record(TestEntry* entry) {
-    printf("Testentry Id: %" PRId64 "\n", entry->id);
     printf("Testentry Prop1: %" PRId64 "\n", entry->prop1);
     printf("Testentry Prop2: %s\n", entry->prop2.str);
 }

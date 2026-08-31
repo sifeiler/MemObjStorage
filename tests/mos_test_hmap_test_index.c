@@ -21,7 +21,7 @@ void test_mos_idx_hmap_init__even_item_count(void) {
     uint8_t test_buffer[buffer_size];
     memset(test_buffer, 0, buffer_size);
     mos_t_idx_data* index_data = (mos_t_idx_data*)test_buffer;
-    strncpy(index_data->header.index.name, "test_index", sizeof(index_data->header.index.name) - 1);
+    index_data->header.index.id = 0;
     index_data->header.index.index_offset = 0;
     index_data->header.index.type = MOS_IDX_HASH_MAP;
     index_data->header.index.index_size = buffer_size;
@@ -53,7 +53,7 @@ void test_mos_idx_hmap_init__odd_item_count(void) {
     uint8_t test_buffer[buffer_size];
     memset(test_buffer, 0, buffer_size);
     mos_t_idx_data* index_data = (mos_t_idx_data*)test_buffer;
-    strncpy(index_data->header.index.name, "test_index", sizeof(index_data->header.index.name) - 1);
+    index_data->header.index.id = 0;
     index_data->header.index.index_offset = 0;
     index_data->header.index.type = MOS_IDX_HASH_MAP;
     index_data->header.index.index_size = buffer_size;
@@ -97,7 +97,7 @@ void test_mos_idx_hmap_put__first_slot_available(void) {
     uint8_t test_buffer[buffer_size];
     memset(test_buffer, 0, buffer_size);
     mos_t_idx_data* index_data = (mos_t_idx_data*)test_buffer;
-    strncpy(index_data->header.index.name, "test_index", sizeof(index_data->header.index.name) - 1);
+    index_data->header.index.id = 0;
     index_data->header.index.index_offset = 0;
     index_data->header.index.type = MOS_IDX_HASH_MAP;
     index_data->header.index.index_size = buffer_size;
@@ -142,7 +142,7 @@ void test_mos_idx_hmap_put__first_slot_occupied(void) {
     uint8_t test_buffer[buffer_size];
     memset(test_buffer, 0, buffer_size);
     mos_t_idx_data* index_data = (mos_t_idx_data*)test_buffer;
-    strncpy(index_data->header.index.name, "test_index", sizeof(index_data->header.index.name) - 1);
+    index_data->header.index.id = 0;
     index_data->header.index.index_offset = 0;
     index_data->header.index.type = MOS_IDX_HASH_MAP;
     index_data->header.index.index_size = buffer_size;
@@ -180,7 +180,7 @@ void test_mos_idx_hmap_put__table_full(void) {
     uint8_t test_buffer[buffer_size];
     memset(test_buffer, 0, buffer_size);
     mos_t_idx_data* index_data = (mos_t_idx_data*)test_buffer;
-    strncpy(index_data->header.index.name, "test_index", sizeof(index_data->header.index.name) - 1);
+    index_data->header.index.id = 0;
     index_data->header.index.index_offset = 0;
     index_data->header.index.type = MOS_IDX_HASH_MAP;
     index_data->header.index.index_size = buffer_size;

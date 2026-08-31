@@ -29,60 +29,60 @@ typedef enum mos_idx_t_hnsw_status {
    2. STRUCTS
    ========================================================================= */
 
-#pragma pack(push, 1)
+typedef struct mos_t_idx_hnsw_neighbor {
+    uint64_t node_id;
+    float distance;
+    uint8_t _pad[4];
+} mos_t_idx_hnsw_neighbor;
+
 typedef struct mos_t_idx_arena_chunk {
     uint16_t neighbors_count;
-    uint64_t neighbors[];
+    uint8_t _pad[6];
+    mos_t_idx_hnsw_neighbor neighbors[];
 } mos_t_idx_arena_chunk;
-#pragma pack(pop)
 
-#pragma pack(push, 1)
 typedef struct mos_t_idx_hnsw_header {
     //vectors
     uint64_t vectors_offset;
-    uint16_t vector_dim;
-
-    /**
-     * vector_dim rounded up to next multiple of SIMD width
-     */
+    //vector_dim rounded up to next multiple of SIMD width
     uint64_t vector_dim_padded;
-    uint8_t vector_metric;  //MOS_T_IDX_HNSW_METRIC
 
-    //layer 0
+    // layer 0
     uint64_t l0_nodes_offset;
     uint64_t l0_node_stride;
 
-    //upper layers arena & layers in general
+    // upper layers arena & layers in general
     uint64_t upper_layers_arena_offset;
     uint64_t next_upper_layers_arena_offset;
     uint64_t upper_layers_arena_chunk_stride;
-    uint8_t max_layer_cap;
-    uint8_t current_max_layer;
-
-    //internal_id -> external_id mapping
+    uint64_t upper_layers_arena_size;
+    // internal_id -> external_id mapping
     uint64_t external_ids_offset;
-
-    //graph parameters
-    mos_t_idx_hnsw_graph_config graph_config;
-
     uint64_t node_count;
     uint64_t node_capacity;
     uint64_t entry_node_id;
 
-    bool index_empty;
-} mos_t_idx_hnsw_header;
-#pragma pack(pop)
+    uint16_t vector_dim;
 
-#pragma pack(push, 1)
+    uint8_t vector_metric;  //MOS_T_IDX_HNSW_METRIC
+    uint8_t max_layer_cap;
+    uint8_t current_max_layer;
+    uint8_t index_empty;    // 0 or 1
+
+    // Explicit 2-byte padding to push graph_config to Byte 96 (8-byte aligned)
+    uint8_t _pad[2];
+
+    mos_t_idx_hnsw_graph_config graph_config;
+} mos_t_idx_hnsw_header;
+
 typedef struct mos_t_idx_hnsw_graph_l0_node {
     uint64_t arena_offset;
-    uint8_t max_layer;
     uint16_t neighbors_count;
-    uint64_t neighbors[];
+    uint8_t max_layer;
+    uint8_t _pad[5];
+    mos_t_idx_hnsw_neighbor neighbors[];    // 8-byte aligned
 } mos_t_idx_hnsw_graph_l0_node;
-#pragma pack(pop)
 
-#pragma pack(push, 1)
 typedef struct mos_t_idx_hnsw {
    mos_t_idx_hnsw_header index_header;
 
@@ -94,7 +94,6 @@ typedef struct mos_t_idx_hnsw {
     */
    uint8_t data[];
 } mos_t_idx_hnsw;
-#pragma pack(pop)
 
 /* =========================================================================
    3. FUNCTION DECLARATIONS

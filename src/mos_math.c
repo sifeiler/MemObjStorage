@@ -30,7 +30,7 @@ float mos_math_dot_product_avx2(const float* v1, const float* v2, const uint64_t
 
     __m256 result_reg = _mm256_setzero_ps();
     int64_t dim = (int64_t)dimension;
-    float result_float;
+    float result_float = 0.0f;
     int i = 0;
 
     //is avx2 supported?
@@ -57,7 +57,7 @@ float mos_math_euclidian_distance_squared_avx2(const float* v1, const float* v2,
     __m256 result_reg = _mm256_setzero_ps();
 
     int64_t dim = (int64_t)dimension;
-    float result_float = 0;
+    float result_float = 0.0f;
     int i = 0;
 
     //is avx2 supported?
@@ -100,5 +100,31 @@ uint16_t mos_math_calc_padded_vector_dimension(const uint16_t logical_dim) {
         return MOS_ALIGN_UP(logical_dim, MOS_SIMD_REGISTER_BYTES / sizeof(float));
     } else {
         return logical_dim;
+    }
+}
+
+void mos_math_sanitize_and_normalize(float *vec, uint16_t dim) {
+    float norm_sq = 0.0f;
+
+    for (uint16_t i = 0; i < dim; i++) {
+        // Replace NaNs, Infs, or extreme values with a valid float
+        if (isnan(vec[i]) || isinf(vec[i])) {
+            vec[i] = 0.1f;
+        }
+        norm_sq += vec[i] * vec[i];
+    }
+
+    float norm = sqrtf(norm_sq);
+    
+    // Prevent division by zero for all-zero vectors
+    if (isnan(norm) || isinf(norm) || norm < 1e-6f) {
+        vec[0] = 1.0f; // Default unit vector
+        for (uint16_t i = 1; i < dim; i++) vec[i] = 0.0f;
+        return;
+    }
+
+    // Normalize to unit length (magnitude = 1.0)
+    for (uint16_t i = 0; i < dim; i++) {
+        vec[i] /= norm;
     }
 }

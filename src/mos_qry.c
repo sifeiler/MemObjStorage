@@ -58,7 +58,7 @@ const mos_t_idx* mos_qry_get_index_for_search_step(mos_t_idx* indexes, mos_t_qry
     for (uint64_t i = 0; i < indexes_count; i++) {
         mos_t_idx* index = &indexes[i];
         int index_query_ops = mos_idx_get_supported_index_query_ops(index);
-        if((strcmp(index->attribute.name, attribute_query.attribute_name) == 0) && (index_query_ops & op)) {
+        if((strcmp(index->attribute_name, attribute_query.attribute_name) == 0) && (index_query_ops & op)) {
             return index;
         }
     }
@@ -171,7 +171,7 @@ mos_t_qry_bmp_stack* mos_qry_create_bitmap_stack(const mos_t_qry_bmp_exec_stack*
     stack->free_stack = free_stack;
     stack->result_stack = result_stack;
 
-    //let teh free_stack point to bitmaps
+    //let the free_stack point to bitmaps
     for (uint64_t i = 0; i < stack_size; i++) {
         mos_os_mem_alloc_aligned((void**)&stack->free_stack[i], sizeof(mos_t_qry_bmp) + nWords * sizeof(uint64_t), 64);
         //if there is a single allocation failure, we free everything
@@ -329,6 +329,7 @@ mos_t_qry_bmp* mos_qry_execute(const mos_t_qry_bmp_exec_stack* query_exec, mos_t
             case MOS_QRY_OP_EQ:
             case MOS_QRY_OP_GT:
             case MOS_QRY_OP_LT:
+            case MOS_QRY_OP_SIMILAR:
                 mos_qry_execute_leaf(step, stack);
                 break;
             default:

@@ -18,9 +18,9 @@ typedef struct {
 } TestEntry;
 
 typedef struct {
-    mos_t_config config;
+    mos_t_storage_config config;
     //keep attributes seperatly as otherwise the data is not available in test functions
-    mos_t_attr_info attribute_info[3];
+    mos_t_attr attributes[3];
     mos_t_idx indexes[1];
     mos_t_storage* storage;
     char file_name[256];
@@ -29,44 +29,56 @@ typedef struct {
 static CreateTestConfig test_config = {0};
 
 void setUp(void) {
-    mos_t_config config = {
-        .index_count = 1,
-        .attribute_count = 2,
-        .max_records = 100
-    };
-    test_config.config = config;
+    test_config.config.attribute_count = 2;
+    test_config.config.index_count = 1;
+    test_config.config.max_records = 100;
 
-    mos_t_attr_info prop1 = {
+    mos_t_attr prop1 = {
         .name = "prop1",
-        .type = MOS_ATTR_TYPE_UINT64,
-        .byte_size = 8,
-        .external_offset = offsetof(TestEntry, prop1)
+        .type = MOS_ATTR_TYPE_INTERNAL_UINT64,
+        .field_offset_external = offsetof(TestEntry, prop1),
+        .field_offset_internal = 0,
+        .byte_size_external = EXTERNAL_TYPE_SIZES[MOS_ATTR_TYPE_UINT64],
+        .byte_size_internal = INTERNAL_TYPE_SIZES[MOS_ATTR_TYPE_INTERNAL_UINT64],
+        .indexed = 1
     };
-    mos_t_attr_info prop2 = {
+    mos_t_attr prop2 = {
         .name = "prop2",
-        .type = MOS_ATTR_TYPE_UINT64,
-        .byte_size = 8,
-        .external_offset = offsetof(TestEntry, prop2)
+        .type = MOS_ATTR_TYPE_INTERNAL_UINT64,
+        .field_offset_external = offsetof(TestEntry, prop2),
+        .field_offset_internal = prop1.byte_size_internal,
+        .byte_size_external = EXTERNAL_TYPE_SIZES[MOS_ATTR_TYPE_UINT64],
+        .byte_size_internal = INTERNAL_TYPE_SIZES[MOS_ATTR_TYPE_INTERNAL_UINT64],
+        .indexed = 0
     };
-    test_config.attribute_info[0] = prop1;
-    test_config.attribute_info[1] = prop2;
+    test_config.attributes[0] = prop1;
+    test_config.attributes[1] = prop2;
 
     mos_t_idx prop1_idx = {
-        .name = "idx_prop1",
+        .id = 1,
         .type = MOS_IDX_HASH_MAP,
-        .attribute = {
-            .name = "prop1",
-            .type = MOS_ATTR_TYPE_UINT64,
-            .byte_size = 8,
-            .external_offset = offsetof(TestEntry, prop1)
-        },
-        .index_size = 8192
+        .attribute_name = "prop1",
+        .index_size = 8192,
+        .params = {0}
     };
     test_config.indexes[0] = prop1_idx;
 
-    //point test_config to global static array and not to stack (avoid dangling pointer)
-    test_config.config.attributes = test_config.attribute_info;
-    test_config.config.indexes = test_config.indexes;
+    test_config.config.attributes = calloc(1, sizeof(mos_t_attr) * test_config.config.attribute_count);
+    strcpy(test_config.config.attributes[0].name, "prop1");
+    test_config.config.attributes[0].type = MOS_ATTR_TYPE_UINT64;
+    test_config.config.attributes[0].byte_size = 8;
+    test_config.config.attributes[0].field_offset = offsetof(TestEntry, prop1);
+    test_config.config.attributes[0].indexed = 1;
+
+    strcpy(test_config.config.attributes[1].name, "prop2");
+    test_config.config.attributes[1].type = MOS_ATTR_TYPE_UINT64;
+    test_config.config.attributes[1].byte_size = 8;
+    test_config.config.attributes[1].field_offset = offsetof(TestEntry, prop2);
+    test_config.config.attributes[1].indexed = 0;
+
+    test_config.config.indexes = calloc(1, sizeof(mos_t_idx) * test_config.config.index_count);
+    strcpy(test_config.config.indexes[0].attribute_name, "prop1");
+    test_config.config.indexes[0].type = MOS_IDX_HASH_MAP;
 }
 
 void tearDown(void) {
@@ -76,6 +88,14 @@ void after_test() {
     if(test_config.storage != NULL) {
         mos_free_storage(test_config.storage);
         test_config.storage = NULL;
+    }
+
+    if(test_config.config.attributes != NULL) {
+        free(test_config.config.attributes);
+    }
+
+    if(test_config.config.indexes != NULL) {
+        free(test_config.config.indexes);
     }
 
     // reset static struct to start clean for next test
@@ -152,6 +172,7 @@ void mos_test_mos_init_layout__layout_correct(void) {
 void mos_test_mos_create_storage__file_size(void) {
     //Arrange
     strcpy(test_config.file_name, "tests/mos_test_mos_create_storage__file_size.db");
+    strcpy(test_config.config.storage_path, "tests/mos_test_mos_create_storage__file_size.db");
 
     //Act
     test_config.storage = mos_create_storage(test_config.file_name, &test_config.config);
@@ -173,6 +194,8 @@ void mos_test_mos_create_storage__file_size(void) {
 void mos_test_mos_create_storage__check_header_area(void) {
     //Arrange
     strcpy(test_config.file_name, "tests/mos_test_mos_create_storage__check_header_area.db");
+    strcpy(test_config.config.storage_path, "tests/mos_test_mos_create_storage__check_header_area.db");
+
     uint8_t header[4096] = {0};
     mos_t_header expected_header = {
         .identifier = MOS_FILE_ID,
@@ -230,16 +253,17 @@ void mos_test_mos_create_storage__check_header_area(void) {
 void mos_test_mos_create_storage__check_attribute_area(void) {
     //Arrange
     strcpy(test_config.file_name, "tests/mos_test_mos_create_storage__check_attribute_area.db");
+    strcpy(test_config.config.storage_path, "tests/mos_test_mos_create_storage__check_attribute_area.db");
 
     //Act
     test_config.storage = mos_create_storage(test_config.file_name, &test_config.config);
 
     //Assert
     mos_t_layout layout = test_config.storage->storage_header->layout;
-    mos_t_attr_info* actual_attributes = MOS_GET_PTR(test_config.storage->mmap_ptr, layout.offset_attributes);
-    size_t expected_total_size = test_config.config.attribute_count * sizeof(mos_t_attr_info);
+    mos_t_attr* actual_attributes = MOS_GET_PTR(test_config.storage->mmap_ptr, layout.offset_attributes);
+    size_t expected_total_size = test_config.config.attribute_count * sizeof(mos_t_attr);
     //TODO: how to check the padding too?
-    TEST_ASSERT_EQUAL_MEMORY(actual_attributes, test_config.attribute_info, expected_total_size);
+    TEST_ASSERT_EQUAL_MEMORY(actual_attributes, test_config.attributes, expected_total_size);
 
     after_test();
 }
@@ -251,19 +275,18 @@ void print_storage_index(const mos_t_idx* idx) {
     }
 
     printf("--- mos_t_idx Instance ---\n");
-    printf("Name:        %s\n", idx->name);
+    printf("Id:        %d\n", idx->id);
     printf("Type:        %d\n", idx->type);
     printf("Index Size:  %zu bytes\n", (size_t)idx->index_size);
     printf("Index Data Offset: 0x%08lX\n", (unsigned long)idx->index_offset);
-    printf("Attr Name: %s\n", idx->attribute.name);
-    printf("Attr Type: %d\n", idx->attribute.type);
-    printf("Attr External Offset: 0x%08lX\n", (unsigned long)idx->attribute.external_offset);
+    printf("Attr Name: %s\n", idx->attribute_name);
     printf("---------------------------\n");
 }
 
 void mos_test_mos_create_storage__check_index_area(void) {
     //Arrange
     strcpy(test_config.file_name, "tests/mos_test_mos_create_storage__check_index_area.db");
+    strcpy(test_config.config.storage_path, "tests/mos_test_mos_create_storage__check_index_area.db");
 
     mos_t_idx expected_indexes[2] = {0};
 
@@ -272,28 +295,18 @@ void mos_test_mos_create_storage__check_index_area(void) {
 
     //Assert
     mos_t_idx id_index = {
-        .name = "idx_id",
+        .id = 0,
         .type = MOS_IDX_HASH_MAP,
         .index_size = 8192,     //padded header + padded values & verifiers
-        .attribute = {
-            .name = "id",
-            .type = MOS_ATTR_TYPE_UINT64,
-            .byte_size = 8,
-            .external_offset = MOS_NULL_OFFSET,
-        },
+        .attribute_name = "id",
         .index_offset = 0,
         .params = {0}
     };
     mos_t_idx prop1_idx = {
-        .name = "idx_prop1",
+        .id = 1,
         .type = MOS_IDX_HASH_MAP,
         .index_size = 8192,     //padded header + padded values & verifiers
-        .attribute = {
-            .name = "prop1",
-            .type = MOS_ATTR_TYPE_UINT64,
-            .byte_size = 8,
-            .external_offset = offsetof(TestEntry, prop1)
-        },
+        .attribute_name = "prop1",
         .index_offset = 12288,     //padded index data header + padded header + padded values & verifiers
         .params = {0}
     };
@@ -311,7 +324,7 @@ void mos_test_mos_create_storage__check_index_area(void) {
 
 void assert_storage_ptrs(void* mmap_ptr, mos_t_layout* expected_layout, mos_t_storage* actual_storage) {
     mos_t_header* expected_header_ptr = MOS_GET_PTR(mmap_ptr, expected_layout->offset_header);
-    mos_t_attr_info* expected_attributes_ptr = MOS_GET_PTR(mmap_ptr, expected_layout->offset_attributes);
+    mos_t_attr* expected_attributes_ptr = MOS_GET_PTR(mmap_ptr, expected_layout->offset_attributes);
     mos_t_idx* expected_idx_id_ptr = MOS_GET_PTR(mmap_ptr, expected_layout->offset_indexes);
     mos_t_idx* expected_indexes_ptr = MOS_GET_PTR(mmap_ptr, expected_layout->offset_indexes);
     mos_t_record* expected_entries_ptr = MOS_GET_PTR(mmap_ptr, expected_layout->offset_records);
@@ -321,7 +334,7 @@ void assert_storage_ptrs(void* mmap_ptr, mos_t_layout* expected_layout, mos_t_st
     mos_t_qry_bmp* expected_ready_bitmap_ptr = MOS_GET_PTR(mmap_ptr, expected_layout->offset_ready_bitmap);
     
     mos_t_header* actual_header_ptr = actual_storage->storage_header;
-    mos_t_attr_info* actual_attributes_ptr = actual_storage->attributes;
+    mos_t_attr* actual_attributes_ptr = actual_storage->attributes;
     mos_t_idx* actual_idx_id_ptr = actual_storage->idx_id;
     mos_t_idx* actual_indexes_ptr = actual_storage->indexes;
     mos_t_record* actual_entries_ptr = actual_storage->entries;
@@ -344,6 +357,7 @@ void assert_storage_ptrs(void* mmap_ptr, mos_t_layout* expected_layout, mos_t_st
 void mos_test_mos_create_storage__check_storage_ptrs(void) {
     //Arrange
     strcpy(test_config.file_name, "tests/mos_test_mos_create_storage__check_storage_ptrs.db");
+    strcpy(test_config.config.storage_path, "tests/mos_test_mos_create_storage__check_storage_ptrs.db");
 
     //Act
     test_config.storage = mos_create_storage(test_config.file_name, &test_config.config);
@@ -357,6 +371,7 @@ void mos_test_mos_create_storage__check_storage_ptrs(void) {
 void mos_test_mos_create_storage__check_record_area_empty(void) {
     //Arrange
     strcpy(test_config.file_name, "tests/mos_test_mos_create_storage__check_record_area_empty.db");
+    strcpy(test_config.config.storage_path, "tests/mos_test_mos_create_storage__check_record_area_empty.db");
 
     //Act
     test_config.storage = mos_create_storage(test_config.file_name, &test_config.config);
@@ -375,6 +390,7 @@ void mos_test_mos_create_storage__check_record_area_empty(void) {
 void mos_test_mos_create_storage__check_valid_bitmap_area_empty(void) {
     //Arrange
     strcpy(test_config.file_name, "tests/mos_test_mos_create_storage__check_valid_bitmap_area_empty.db");
+    strcpy(test_config.config.storage_path, "tests/mos_test_mos_create_storage__check_valid_bitmap_area_empty.db");
 
     //Act
     test_config.storage = mos_create_storage(test_config.file_name, &test_config.config);
@@ -393,6 +409,7 @@ void mos_test_mos_create_storage__check_valid_bitmap_area_empty(void) {
 void mos_test_mos_create_storage__check_ready_bitmap_area_empty(void) {
     //Arrange
     strcpy(test_config.file_name, "tests/mos_test_mos_create_storage__check_ready_bitmap_area_empty.db");
+    strcpy(test_config.config.storage_path, "tests/mos_test_mos_create_storage__check_ready_bitmap_area_empty.db");
 
     //Act
     test_config.storage = mos_create_storage(test_config.file_name, &test_config.config);
@@ -411,6 +428,7 @@ void mos_test_mos_create_storage__check_ready_bitmap_area_empty(void) {
 void mos_test_mos_load_storage(void) {
     //Arrange
     strcpy(test_config.file_name, "tests/mos_test_mos_load_storage.db");
+    strcpy(test_config.config.storage_path, "tests/mos_test_mos_load_storage.db");
 
     test_config.storage = mos_create_storage(test_config.file_name, &test_config.config);
     

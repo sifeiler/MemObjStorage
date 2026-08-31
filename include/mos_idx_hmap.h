@@ -17,7 +17,6 @@
    2. STRUCTS
    ========================================================================= */
 
-#pragma pack(push, 1)
 typedef struct mos_t_idx_hmap_header {
    uint64_t table_size;
 
@@ -25,16 +24,13 @@ typedef struct mos_t_idx_hmap_header {
    uint64_t offset_values;
    //offset in mos_t_idx_hmap
    uint64_t offset_verifiers;
-} mos_idx_hmap_header;
-#pragma pack(pop)
+} mos_t_idx_hmap_header;
 
-#pragma pack(push, 1)
 typedef struct mos_t_idx_hmap {
-   mos_idx_hmap_header index_header;
+   mos_t_idx_hmap_header index_header;
    // [values] [verifiers]
    uint64_t data[];
-} mos_idx_hmap;
-#pragma pack(pop)
+} mos_t_idx_hmap;
 
 /* =========================================================================
    3. FUNCTION DECLARATIONS

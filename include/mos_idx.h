@@ -3,7 +3,7 @@
 
 #include <stdint.h>
 #include "mos_types_fwd.h"
-#include "mos.h"
+#include "mos_internal.h"
 #include "mos_idx_hmap.h"
 #include "mos_idx_hnsw.h"
 
@@ -15,24 +15,20 @@
    2. STRUCTS
    ========================================================================= */
 
-#pragma pack(push, 1)
 typedef struct mos_t_idx_data_header {
    mos_t_idx index;
    uint64_t index_payload_offset;   //offset of index_payload in mos_t_idx_data
 } mos_t_idx_data_header;
-#pragma pack(pop)
 
-#pragma pack(push, 1)
 typedef struct mos_t_idx_data {
    mos_t_idx_data_header header;
    //the actual index: hash_map, hnsw, ...
    uint8_t index_payload[];
 } mos_t_idx_data;
-#pragma pack(pop)
 
-typedef union mos_idx_put_result {
-    uint64_t hnsw_node_id;
-    uint8_t raw[8];
+typedef struct mos_idx_put_result {
+   uint64_t byte_size;
+   uint8_t* put_result;
 } mos_idx_put_result;
 
 typedef struct mos_t_idx_ops {

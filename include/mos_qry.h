@@ -14,7 +14,7 @@
    ========================================================================= */
 
 #define MOS_QRY_LOGICAL_OP (MOS_QRY_OP_OR | MOS_QRY_OP_AND | MOS_QRY_OP_NOT)
-#define MOS_QRY_RELATIONAL_OP (MOS_QRY_OP_EQ | MOS_QRY_OP_GT | MOS_QRY_OP_LT | MOS_QRY_OP_SIMILAR)
+#define MOS_QRY_RELATIONAL_OP (MOS_QRY_OP_EQ | MOS_QRY_OP_SIMILAR)
 
 /**
  * This stack contains bitmaps. It will be used to run a QueryExecStack.

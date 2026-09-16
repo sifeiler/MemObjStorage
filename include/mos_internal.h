@@ -228,9 +228,7 @@ typedef enum MOS_QRY_OPERATOR {
     MOS_QRY_OP_AND  = 1 << 1,
     MOS_QRY_OP_NOT  = 1 << 2,
     MOS_QRY_OP_EQ   = 1 << 3,
-    MOS_QRY_OP_GT   = 1 << 4,
-    MOS_QRY_OP_LT   = 1 << 5,
-    MOS_QRY_OP_SIMILAR     = 1 << 6
+    MOS_QRY_OP_SIMILAR     = 1 << 4
 } MOS_QRY_OPERATOR;
 
 typedef struct mos_t_qry_search_step {

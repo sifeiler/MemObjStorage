@@ -125,13 +125,13 @@ static inline mos_t_idx_hmap_ptrs mos_idx_hmap_get_data_ptrs(mos_t_idx_data* idx
     return ptrs;
 }
 
-/* Implementation of hash map index size. See hash_map_index.h for documentation. */
+/* Implementation of hash map index size. See mos_idx_hmap.h for documentation. */
 uint64_t mos_idx_hmap_size(uint64_t item_count, mos_t_idx* idx) {
     mos_t_idx_hmap_idx_size index_size = mos_idx_hnsw_get_index_size(item_count, idx);
     return index_size.total_index_size_page_padded;
 }
 
-/* Implementation of hash map index initialization. See hash_map_index.h for documentation. */
+/* Implementation of hash map index initialization. See mos_idx_hmap.h for documentation. */
 void mos_idx_hmap_init(uint64_t item_count, mos_t_idx* idx, mos_t_idx_data* idx_data) {
     mos_t_idx_hmap_ptrs hmap_ptrs = mos_idx_hmap_get_data_ptrs(idx_data);
     mos_t_idx_hmap* idx_hash_map = hmap_ptrs.hmap;

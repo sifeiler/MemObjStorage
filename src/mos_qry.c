@@ -327,8 +327,6 @@ mos_t_qry_bmp* mos_qry_execute(const mos_t_qry_bmp_exec_stack* query_exec, mos_t
                 mos_qry_execute_not(stack);
                 break;
             case MOS_QRY_OP_EQ:
-            case MOS_QRY_OP_GT:
-            case MOS_QRY_OP_LT:
             case MOS_QRY_OP_SIMILAR:
                 mos_qry_execute_leaf(step, stack);
                 break;

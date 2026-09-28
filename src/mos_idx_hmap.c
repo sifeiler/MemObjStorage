@@ -100,7 +100,8 @@ __uint128_t mos_idx_murmur_hash_3_128(const uint8_t* data, const uint64_t seed, 
     return ((__uint128_t)hash2 << 64) | hash1;
 }
 
-mos_t_idx_hmap_idx_size mos_idx_hnsw_get_index_size(const uint64_t item_count, mos_t_idx* idx) {
+mos_t_idx_hmap_idx_size mos_idx_hnsw_get_index_size(const uint64_t item_count, mos_t_idx_descriptor* index_desc) {
+    UNUSED(index_desc);
     mos_t_idx_hmap_idx_size index_sizes;
     index_sizes.header_size_page_padded = MOS_ALIGN_UP(sizeof(mos_t_idx_hmap_header), MOS_PAGE_SIZE);
     index_sizes.item_size = sizeof(*((mos_t_idx_hmap*)0)->data);
@@ -126,18 +127,18 @@ static inline mos_t_idx_hmap_ptrs mos_idx_hmap_get_data_ptrs(mos_t_idx_data* idx
 }
 
 /* Implementation of hash map index size. See mos_idx_hmap.h for documentation. */
-uint64_t mos_idx_hmap_size(uint64_t item_count, mos_t_idx* idx) {
-    mos_t_idx_hmap_idx_size index_size = mos_idx_hnsw_get_index_size(item_count, idx);
+uint64_t mos_idx_hmap_size(uint64_t item_count, mos_t_idx_descriptor* index_desc) {
+    mos_t_idx_hmap_idx_size index_size = mos_idx_hnsw_get_index_size(item_count, index_desc);
     return index_size.total_index_size_page_padded;
 }
 
 /* Implementation of hash map index initialization. See mos_idx_hmap.h for documentation. */
-void mos_idx_hmap_init(uint64_t item_count, mos_t_idx* idx, mos_t_idx_data* idx_data) {
+void mos_idx_hmap_init(uint64_t item_count, mos_t_idx_descriptor* index_desc, mos_t_idx_data* idx_data) {
     mos_t_idx_hmap_ptrs hmap_ptrs = mos_idx_hmap_get_data_ptrs(idx_data);
     mos_t_idx_hmap* idx_hash_map = hmap_ptrs.hmap;
-    mos_t_idx_hmap_idx_size index_size = mos_idx_hnsw_get_index_size(item_count, idx);
+    mos_t_idx_hmap_idx_size index_size = mos_idx_hnsw_get_index_size(item_count, index_desc);
    
-    idx->index_size = index_size.total_index_size_page_padded;
+    index_desc->index_size = index_size.total_index_size_page_padded;
     idx_hash_map->index_header.table_size = index_size.table_size_padded;
 
     //index values come right after the header
@@ -148,6 +149,7 @@ void mos_idx_hmap_init(uint64_t item_count, mos_t_idx* idx, mos_t_idx_data* idx_
 }
 
 int64_t mos_idx_hmap_put(mos_t_idx_data* idx_data, const uint8_t* key, const size_t key_byte_len, const uint64_t value, mos_idx_put_result* result) {
+    UNUSED(result);
     mos_t_idx_hmap_ptrs hmap_ptrs = mos_idx_hmap_get_data_ptrs(idx_data);
     mos_t_idx_hmap* index = hmap_ptrs.hmap;
     mos_t_idx_hmap_header index_header = index->index_header;
@@ -201,7 +203,6 @@ int64_t mos_idx_hmap_find_row_id(const mos_t_idx_data* idx_data, const uint8_t* 
     mos_t_idx_hmap_ptrs hmap_ptrs = mos_idx_hmap_get_data_ptrs(idx_data);
     mos_t_idx_hmap* index = hmap_ptrs.hmap;
     mos_t_idx_hmap_header index_header = index->index_header;
-    uint64_t table_size = index_header.table_size;
     uint64_t* index_verifiers = hmap_ptrs.index_verifiers;
 
     __uint128_t hash = mos_idx_murmur_hash_3_128(key, MOS_IDX_MURMUR3_SEED, key_byte_len);
@@ -227,7 +228,6 @@ int64_t mos_idx_hmap_find_row_id(const mos_t_idx_data* idx_data, const uint8_t* 
 
 int64_t mos_idx_hmap_get(const mos_t_idx_data* idx_data, const uint8_t* key, const size_t key_len) {
     mos_t_idx_hmap_ptrs hmap_ptrs = mos_idx_hmap_get_data_ptrs(idx_data);
-    mos_t_idx_hmap* index = hmap_ptrs.hmap;
     uint64_t* index_values = hmap_ptrs.index_values;
 
     int64_t i = mos_idx_hmap_find_row_id(idx_data, key, key_len);
@@ -241,9 +241,6 @@ int64_t mos_idx_hmap_get(const mos_t_idx_data* idx_data, const uint8_t* key, con
 
 void mos_idx_hmap_remove(mos_t_idx_data* idx_data, const uint8_t* key, const size_t key_byte_len) {
     mos_t_idx_hmap_ptrs hmap_ptrs = mos_idx_hmap_get_data_ptrs(idx_data);
-    mos_t_idx_hmap* index = hmap_ptrs.hmap;
-    mos_t_idx_hmap_header index_header = index->index_header;
-    uint64_t table_size = index_header.table_size;
     uint64_t* index_values = hmap_ptrs.index_values;
     uint64_t* index_verifiers = hmap_ptrs.index_verifiers;
 

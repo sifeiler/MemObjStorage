@@ -52,35 +52,37 @@ uint64_t mos_qry_calc_bitmap_stack_size(const mos_t_qry_bmp_exec_stack* exec) {
     return max_stack_size;
 }
 
-const mos_t_idx* mos_qry_get_index_for_search_step(mos_t_idx* indexes, mos_t_qry_search_step* search_step, uint64_t indexes_count) {
+const mos_t_idx_descriptor* mos_qry_get_index_for_search_step(mos_t_idx_descriptor* index_descriptors, mos_t_qry_search_step* search_step, uint64_t indexes_count) {
     mos_t_qry_attr_qry attribute_query = search_step->attribute_query;
     MOS_QRY_OPERATOR op = search_step->op;
     for (uint64_t i = 0; i < indexes_count; i++) {
-        mos_t_idx* index = &indexes[i];
-        int index_query_ops = mos_idx_get_supported_index_query_ops(index);
-        if((strcmp(index->attribute_name, attribute_query.attribute_name) == 0) && (index_query_ops & op)) {
-            return index;
+        mos_t_idx_descriptor* index_descriptor = &index_descriptors[i];
+        int index_query_ops = mos_idx_get_supported_index_query_ops(index_descriptor);
+        if((strcmp(index_descriptor->attribute_name, attribute_query.attribute_name) == 0) && (index_query_ops & op)) {
+            return index_descriptor;
         }
     }
     return NULL;
-} 
+}
 
 void mos_qry_build_exec_stack(mos_t_storage* storage, mos_t_qry_bmp_exec_stack* exec_stack, mos_t_qry_search_step* search_step) {
     mos_t_qry_bmp_exec_step* curr_step = exec_stack->exec_steps[exec_stack->top];
     MOS_QRY_OPERATOR op = search_step->op;
     curr_step->op = op;
 
+    mos_t_idx_descriptor* mmap_index_desc = mos_accessor_header_index_descriptors(&storage->header_region);
     if(op & MOS_QRY_RELATIONAL_OP) {
-        const mos_t_idx* index = mos_qry_get_index_for_search_step(storage->indexes, search_step, storage->storage_header->index_count);
+        mos_t_header* mmap_header = mos_accessor_header(&storage->header_region);
+        const mos_t_idx_descriptor* index_descriptor = mos_qry_get_index_for_search_step(mmap_index_desc, search_step, mmap_header->index_count);
 
-        if(index == NULL) {
+        if(index_descriptor == NULL) {
             //report_error("Cannot find index for attribute %s and operator %s.", search_step->attribute_query.attribute_name, search_step->operator);
             return;
         }
 
         curr_step->attr_query = search_step->attribute_query;
-        curr_step->idx_data = MOS_GET_PTR(storage->index_data, index->index_offset);
-        curr_step->idx_type = index->type;
+        curr_step->idx_data = mos_accessor_idx_data(storage->index_regions, mmap_header->index_count, index_descriptor->index_region_pos);
+        curr_step->idx_type = index_descriptor->type;
         curr_step->sub_step_count = 0;
     } else {
         curr_step->sub_step_count = search_step->step_count;
@@ -360,7 +362,8 @@ mos_t_qry_bmp* mos_qry_process_search(mos_t_storage* storage, mos_t_qry* query) 
     const mos_t_qry_bmp_exec_stack* exec_stack = mos_qry_create_bitmap_exec(storage, query);
     // Create a stack of bitmaps that is big enough to execute exec_stack
     // Every bitmap on the stack will have a single bit per record.
-    mos_t_qry_bmp_stack* bitmap_stack = mos_qry_create_bitmap_stack(exec_stack, storage->storage_header->max_records);
+    mos_t_header* mmap_header = mos_accessor_header(&storage->header_region);
+    mos_t_qry_bmp_stack* bitmap_stack = mos_qry_create_bitmap_stack(exec_stack, mmap_header->max_records);
     mos_t_qry_bmp* result = mos_qry_execute(exec_stack, bitmap_stack);
 
     mos_t_qry_bmp* result_clone = mos_qry_bitmap_clone(result);

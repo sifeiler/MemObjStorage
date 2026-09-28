@@ -3,9 +3,12 @@
 
 #include <stdio.h>
 #include <stdint.h>
+#include <stddef.h>
+#include <assert.h>
 #include "mos_types_fwd.h"
 #include "mos.h"
 #include "mos_string.h"
+#include "mos_memory.h"
 
 /* =========================================================================
    1. CONSTANTS, MACROS, ENUMS
@@ -20,6 +23,8 @@
 #define MOS_AVG_STRING_LEN 100
 
 #define MOS_MAX_ALLOWED_ATTR 1024
+
+#define MOS_ID_INDEX_POS 0
 
 /**
  * Basically the types that replace the user provided attribute types internally.
@@ -91,8 +96,6 @@ static const uint32_t attr_index_support[32] = {
 typedef struct mos_t_layout {
     //sizes
     uint64_t header_size;
-    uint64_t attributes_size;
-    uint64_t indexes_size;
     uint64_t valid_bitmap_size;
     uint64_t ready_bitmap_size;
     uint64_t record_size;
@@ -101,17 +104,6 @@ typedef struct mos_t_layout {
     uint64_t records_size;
     uint64_t index_data_size;
     uint64_t string_silo_size;
-    uint64_t file_size;
-
-    //offsets
-    uint64_t offset_header;
-    uint64_t offset_attributes;
-    uint64_t offset_indexes;
-    uint64_t offset_valid_bitmap;
-    uint64_t offset_ready_bitmap;
-    uint64_t offset_records;
-    uint64_t offset_index_data;
-    uint64_t offset_string_silo;
 } mos_t_layout;
 
 typedef struct mos_t_state {
@@ -120,9 +112,11 @@ typedef struct mos_t_state {
 } mos_t_state;
 
 typedef struct mos_t_header {
-    uint64_t identifier;            //0x1111CCAC
+    uint64_t identifier;                        //0x1111CCAC
     uint64_t attribute_count;
     uint64_t index_count;
+    uint64_t attributes_offset;                 // byte offset from the start of the header region
+    uint64_t index_descriptors_offset;
     uint64_t max_records;
 
     mos_t_layout layout;
@@ -138,34 +132,28 @@ typedef struct mos_t_record {
     uint8_t data[];                 // the actual user data
 } mos_t_record;
 
-typedef struct mos_t_idx {
-    uint64_t index_offset;                      // offset in index_data section (first index has offset 0)
+typedef struct mos_t_idx_descriptor {
+    uint64_t index_region_pos;                  // the position in the index region array
     uint64_t index_size;                        // bytes occupied in the storage file
     char attribute_name[MOS_ATTR_NAME_LENGTH];  // the corresponding attribute
     uint16_t id;                                // a unique identifier among all
     uint8_t type;                               // MOS_IDX_TYPE
-    uint8_t _pad[3];
+    uint8_t _pad[5];
 
     //optional parameters that are to be selected based on field `type`
     union {
         mos_t_idx_params_hnsw hnsw;
     } params;
-} mos_t_idx;
+} mos_t_idx_descriptor;
 
 typedef struct mos_t_storage {
-    mos_t_header* storage_header;   // sizes, offsets, layout, etc.
-    mos_t_attr* attributes;         // attribute meta information
-    mos_t_idx* idx_id;              // record id index meta information
-    mos_t_idx* indexes;             // array of index meta information
-    mos_t_record* entries;          // array of entries
-    mos_t_idx_data* idx_id_data;    // record id index
-    mos_t_idx_data* index_data;     // attribute index data
-    mos_t_qry_bmp* valid_bitmap;    // 1 bit for every record
-    mos_t_qry_bmp* ready_bitmap;    // 1 bit for every record
-    void* mmap_ptr;                 // pointer to the memory mapped file
-    char* file_path;                // path to the memory mapped file
-    int fd;                         // memory mapped file (open)
-    void* string_silo_base;         // pointer to the string silo area
+    mos_t_mapped_region header_region;          // sizes, offsets, layout, attribute descriptors, index descriptors etc.
+    mos_t_mapped_region valid_bitmap_region;    // 1 bit for every record
+    mos_t_mapped_region ready_bitmap_region;    // 1 bit for every record
+    mos_t_mapped_region records_region;
+    mos_t_mapped_region string_silo_region;
+
+    mos_t_mapped_region* index_regions;        // an array of regions, each describing one mmapped index file
 } mos_t_storage;
 
 typedef struct mos_t_attr {
@@ -189,7 +177,7 @@ typedef struct mos_t_config {
     uint64_t string_attribute_count;
 
     mos_t_attr* attributes;
-    mos_t_idx* indexes;
+    mos_t_idx_descriptor* indexes;
     char* storage_path;
 } mos_t_config;
 
@@ -298,6 +286,9 @@ typedef struct mos_t_qry_bmp {
     uint64_t data[];
 } mos_t_qry_bmp;
 
+static_assert(offsetof(mos_t_idx_descriptor, params) == 56, "idx descriptor: params not at expected offset");
+static_assert(sizeof(mos_t_idx_descriptor) % 8 == 0, "idx descriptor: size not a multiple of 8");
+
 /* =========================================================================
    FUNCTION DECLARATIONS
    ========================================================================= */
@@ -311,6 +302,32 @@ void mos_init_layout(mos_t_config* cfg, mos_t_layout* layout);
 
 static uint8_t mos_attr_supports_index(MOS_ATTR_TYPE attr_type, MOS_IDX_TYPE idx) {
     return (attr_index_support[attr_type] & idx) != 0;
+}
+
+static inline mos_t_header* mos_accessor_header(mos_t_mapped_region* region) {
+    return (mos_t_header*) region->region_base;
+}
+
+static inline mos_t_attr* mos_accessor_header_attributes(mos_t_mapped_region* region) {
+    mos_t_header* h = (mos_t_header*) region->region_base;
+    return (mos_t_attr*) ((char*)region->region_base + h->attributes_offset);
+}
+
+static inline mos_t_idx_descriptor* mos_accessor_header_index_descriptors(mos_t_mapped_region* region) {
+    mos_t_header* h = (mos_t_header*) region->region_base;
+    return (mos_t_idx_descriptor*) ((char*)region->region_base + h->index_descriptors_offset);
+}
+
+static inline mos_t_string_silo* mos_accessor_string_silo(mos_t_mapped_region* region) {
+    return (mos_t_string_silo*) region->region_base;
+}
+
+static inline mos_t_qry_bmp* mos_accessor_bitmap(mos_t_mapped_region* region) {
+    return (mos_t_qry_bmp*) region->region_base;
+}
+
+static inline mos_t_record* mos_accessor_record(mos_t_mapped_region* region, uint64_t record_row_id) {
+    return ((mos_t_record*) region->region_base) + record_row_id;
 }
 
 static const char* const MOS_IDX_TYPE_NAMES[] = {

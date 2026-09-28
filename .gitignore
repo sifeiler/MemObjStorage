@@ -3,6 +3,11 @@
 build/
 build-release/
 ImHex.hexpat
+tests/tmp
 
 *.db
 *.exe
+
+tests/*
+!tests/*.c
+!tests/*.h

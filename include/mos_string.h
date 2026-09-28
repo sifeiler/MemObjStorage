@@ -49,7 +49,6 @@ typedef struct mos_t_string_desc {
 } mos_t_string_desc;
 
 typedef struct mos_t_string_silo {
-    uint64_t base_offset;              //the silo base offset from file top. Writing will start at base + size and grow towards base.
     uint64_t size;
     uint64_t current_offset;
     mos_t_string_desc last_deleted;    // 4-byte aligned

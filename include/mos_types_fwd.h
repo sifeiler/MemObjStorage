@@ -5,7 +5,7 @@
    mos_idx.h, mos_idx_*.h FORWARD DECLARATIONS
    ========================================================================= */
 typedef enum MOS_IDX_TYPE MOS_IDX_TYPE;
-typedef struct mos_t_idx mos_t_idx;
+typedef struct mos_t_idx_descriptor mos_t_idx_descriptor;
 typedef struct mos_t_idx_data mos_t_idx_data;
 typedef struct mos_t_idx_op mos_t_idx_op;
 typedef struct mos_t_idx_config mos_t_idx_config;

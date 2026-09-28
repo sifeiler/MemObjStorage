@@ -9,15 +9,14 @@ typedef struct {
     uint64_t unique_id;
     uint64_t prop1;
     mos_t_string prop2;
+    uint8_t pad[4];
 } TestEntry;
 
 typedef struct {
     mos_t_storage_config config;
-    //keep attributes seperatly as otherwise the data is not available in test functions
-    mos_t_attr attributes[3];
-    mos_t_idx indexes[2];
+    mos_t_idx_descriptor indexes[2];
     mos_t_storage* storage;
-    char file_name[256];
+    char dir_name[256];
 } CreateTestConfig;
 
 static CreateTestConfig test_config = {0};
@@ -27,41 +26,7 @@ void setUp(void) {
     test_config.config.attribute_count = 3;
     test_config.config.index_count = 2;
     test_config.config.max_records = 4;
-
-    mos_t_attr unique_id = {
-        .name = "unique_id",
-        .type = MOS_ATTR_TYPE_INTERNAL_UINT64,
-        .byte_size_external = sizeof(uint64_t),
-        .field_offset_external = offsetof(TestEntry, unique_id)
-    };
-    mos_t_attr prop1 = {
-        .name = "prop1",
-        .type = MOS_ATTR_TYPE_INTERNAL_UINT64,
-        .byte_size_external = sizeof(uint64_t),
-        .field_offset_external = offsetof(TestEntry, prop1)
-    };
-    mos_t_attr prop2 = {
-        .name = "prop2",
-        .type = MOS_ATTR_TYPE_INTERNAL_STRING_DESC,
-        .field_offset_external = offsetof(TestEntry, prop2)
-    };
-    test_config.attributes[0] = unique_id;
-    test_config.attributes[1] = prop1;
-    test_config.attributes[2] = prop2;
-
-    mos_t_idx prop1_idx = {
-        .id = 1,
-        .type = MOS_IDX_HASH_MAP,
-        .attribute_name = "prop1"
-    };
-    mos_t_idx prop2_idx = {
-        .id = 2,
-        .type = MOS_IDX_HASH_MAP,
-        .attribute_name = "prop2"
-    };
-    
-    test_config.indexes[0] = prop1_idx;
-    test_config.indexes[1] = prop2_idx;
+    test_config.config.padded_record_byte_size = sizeof(TestEntry);
 
     test_config.config.attributes = calloc(1, sizeof(mos_t_attr) * test_config.config.attribute_count);
     strcpy(test_config.config.attributes[0].name, "unique_id");
@@ -82,7 +47,7 @@ void setUp(void) {
     test_config.config.attributes[2].field_offset = offsetof(TestEntry, prop2);
     test_config.config.attributes[2].indexed = 1;
 
-    test_config.config.indexes = calloc(1, sizeof(mos_t_idx) * test_config.config.index_count);
+    test_config.config.indexes = calloc(1, sizeof(mos_t_idx_descriptor) * test_config.config.index_count);
     strcpy(test_config.config.indexes[0].attribute_name, "prop1");
     test_config.config.indexes[0].type = MOS_IDX_HASH_MAP;
 
@@ -90,6 +55,8 @@ void setUp(void) {
     test_config.config.indexes[1].type = MOS_IDX_HASH_MAP;
 
     result = NULL;
+
+    mos_os_directory_create("tests/tmp");
 }
 
 void tearDown(void) {
@@ -116,8 +83,9 @@ void tearDown(void) {
 
 void test_storage_search__logical_and(void) {
     //Arrange
-    strcpy(test_config.file_name, "tests/test_storage_search__logical_and.db");
-    strcpy(test_config.config.storage_path, "tests/test_storage_search__logical_and.db");
+    strcpy(test_config.dir_name, "tests/tmp/test_storage_search__logical_and");
+    strcpy(test_config.config.storage_path, "tests/tmp/test_storage_search__logical_and");
+    mos_os_directory_create("tests/tmp/test_storage_search__logical_and");
 
     TestEntry entry = {
         .unique_id = 1,
@@ -137,7 +105,7 @@ void test_storage_search__logical_and(void) {
         }
     };
 
-    mos_t_storage* storage = mos_create_storage(test_config.file_name, &test_config.config);
+    mos_t_storage* storage = mos_create_storage(test_config.dir_name, &test_config.config);
     test_config.storage = storage;
     uint64_t id1 = 1;
     uint64_t id2 = 2;
@@ -172,8 +140,9 @@ void test_storage_search__logical_and(void) {
 
 void test_storage_search__logical_or(void) {
     //Arrange
-    strcpy(test_config.file_name, "tests/test_storage_search__logical_or.db");
-    strcpy(test_config.config.storage_path, "tests/test_storage_search__logical_or.db");
+    strcpy(test_config.dir_name, "tests/tmp/test_storage_search__logical_or");
+    strcpy(test_config.config.storage_path, "tests/tmp/test_storage_search__logical_or");
+    mos_os_directory_create("tests/tmp/test_storage_search__logical_or");
 
     TestEntry entry = {
         .unique_id = 1,
@@ -202,7 +171,7 @@ void test_storage_search__logical_or(void) {
         }
     };
 
-    mos_t_storage* storage = mos_create_storage(test_config.file_name, &test_config.config);
+    mos_t_storage* storage = mos_create_storage(test_config.dir_name, &test_config.config);
     test_config.storage = storage;
     uint64_t id1 = 1;
     uint64_t id2 = 2;
@@ -242,8 +211,9 @@ void test_storage_search__logical_or(void) {
  */
 void test_storage_search__logical_not(void) {
     //Arrange
-    strcpy(test_config.file_name, "tests/test_storage_search__logical_not.db");
-    strcpy(test_config.config.storage_path, "tests/test_storage_search__logical_not.db");
+    strcpy(test_config.dir_name, "tests/tmp/test_storage_search__logical_not");
+    strcpy(test_config.config.storage_path, "tests/tmp/test_storage_search__logical_not");
+    mos_os_directory_create("tests/tmp/test_storage_search__logical_not");
 
     TestEntry entry = {
         .unique_id = 1,
@@ -263,7 +233,7 @@ void test_storage_search__logical_not(void) {
         }
     };
 
-    mos_t_storage* storage = mos_create_storage(test_config.file_name, &test_config.config);
+    mos_t_storage* storage = mos_create_storage(test_config.dir_name, &test_config.config);
     test_config.storage = storage;
     uint64_t id1 = 1;
     uint64_t id2 = 2;

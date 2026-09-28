@@ -36,14 +36,14 @@
  *  Now the AND operation uses the first result bitmap at data[result_top - 3 (substeps)] and combines all the results there.
  */
 typedef struct mos_t_qry_bmp_stack {
-    int64_t result_top;
-    int64_t free_top;
-    uint64_t stack_size;
+    int64_t          result_top;
+    int64_t          free_top;
+    uint64_t         stack_size;
 
     // Array of pointers to bitmaps. 
     // Needed because during execution, only pointers should be pushed and popped.
-    mos_t_qry_bmp** free_stack;
-    mos_t_qry_bmp** result_stack;
+    mos_t_qry_bmp**  free_stack;
+    mos_t_qry_bmp**  result_stack;
 } mos_t_qry_bmp_stack;
 
 typedef struct mos_t_qry_bmp_exec_stack {

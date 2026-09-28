@@ -99,8 +99,8 @@ typedef struct mos_t_idx_hnsw {
    3. FUNCTION DECLARATIONS
    ========================================================================= */
 
-uint64_t mos_idx_hnsw_size(const uint64_t item_count, mos_t_idx* idx);
-void mos_idx_hnsw_init(const uint64_t item_count, mos_t_idx* idx, mos_t_idx_data* idx_data);
+uint64_t mos_idx_hnsw_size(const uint64_t item_count, mos_t_idx_descriptor* index_descriptor);
+void mos_idx_hnsw_init(const uint64_t item_count, mos_t_idx_descriptor* index_descriptor, mos_t_idx_data* idx_data);
 
 int64_t mos_idx_hnsw_put(mos_t_idx_data* idx_data, const uint8_t* key, const size_t key_len, const uint64_t value, mos_idx_put_result* result);
 int64_t mos_idx_hnsw_get(const mos_t_idx_data* idx_data, const uint8_t* key, const size_t key_len);

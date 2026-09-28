@@ -110,9 +110,9 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
             break;
         }
 
-        mos_t_idx hnsw_idx = {
+        mos_t_idx_descriptor hnsw_idx = {
             .id = 1,
-            .index_offset = 0,
+            .index_region_pos = 0,
             .type = MOS_IDX_HNSW,
             .params.hnsw = {
                 .vector_dim = vector_dim,
@@ -137,9 +137,9 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
             free(ground_truth);
             break;
         }
-        idx_data->header.index = hnsw_idx;
+        idx_data->header.index_desc = hnsw_idx;
         idx_data->header.index_payload_offset = idx_data_header_size_page_aligned;
-        mos_idx_hnsw_init(item_count, &idx_data->header.index, idx_data);
+        mos_idx_hnsw_init(item_count, &idx_data->header.index_desc, idx_data);
 
         float query_vector[vector_dim];
         memcpy(query_vector, &data[pos], vector_byte_size);

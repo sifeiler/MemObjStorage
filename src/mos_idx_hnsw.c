@@ -256,9 +256,9 @@ uint64_t mos_idx_hnsw_upper_layer_arena_size(const uint64_t max_node_count, mos_
     return arena_byte_size;
 }
 
-mos_t_idx_hnsw_idx_size mos_idx_hnsw_get_index_size_padded(const uint64_t max_node_count, mos_t_idx* idx) {
-    assert(idx->type == MOS_IDX_HNSW);
-    mos_t_idx_params_hnsw idx_params_hnsw = idx->params.hnsw;
+mos_t_idx_hnsw_idx_size mos_idx_hnsw_get_index_size_padded(const uint64_t max_node_count, mos_t_idx_descriptor* index_desc) {
+    assert(index_desc->type == MOS_IDX_HNSW);
+    mos_t_idx_params_hnsw idx_params_hnsw = index_desc->params.hnsw;
     mos_t_idx_hnsw_graph_config graph_config = idx_params_hnsw.graph_config;
 
     mos_t_idx_hnsw_idx_size padded_size;
@@ -300,25 +300,25 @@ mos_t_idx_hnsw_idx_size mos_idx_hnsw_get_index_size_padded(const uint64_t max_no
  * upper_layer_arena: MOS_PAGE_SIZE aligned
  * internal_id -> external_id mapping: MOS_PAGE_SIZE aligned
  */
-uint64_t mos_idx_hnsw_size(const uint64_t max_node_count, mos_t_idx* idx) {
-    assert(idx->type == MOS_IDX_HNSW);
-    mos_t_idx_hnsw_idx_size padded_index_size = mos_idx_hnsw_get_index_size_padded(max_node_count, idx);
+uint64_t mos_idx_hnsw_size(const uint64_t max_node_count, mos_t_idx_descriptor* index_descriptor) {
+    assert(index_descriptor->type == MOS_IDX_HNSW);
+    mos_t_idx_hnsw_idx_size padded_index_size = mos_idx_hnsw_get_index_size_padded(max_node_count, index_descriptor);
     return padded_index_size.index_total_size;
 }
 
-void mos_idx_hnsw_init(const uint64_t item_count, mos_t_idx* idx, mos_t_idx_data* idx_data) {
-    assert(idx_data->header.index.type == MOS_IDX_HNSW);
+void mos_idx_hnsw_init(const uint64_t item_count, mos_t_idx_descriptor* index_descriptor, mos_t_idx_data* idx_data) {
+    assert(idx_data->header.index_desc.type == MOS_IDX_HNSW);
 
-    mos_t_idx_hnsw_idx_size padded_index_size = mos_idx_hnsw_get_index_size_padded(item_count, idx);
+    mos_t_idx_hnsw_idx_size padded_index_size = mos_idx_hnsw_get_index_size_padded(item_count, index_descriptor);
 
     // Caution! Not all pointers are valid at this point. Offsets needed for hnsw_ptrs are configured in this functions!
     mos_t_idx_hnsw_ptrs hnsw_ptrs = mos_idx_hnsw_get_data_ptrs(idx_data);
     mos_t_idx_hnsw* index = hnsw_ptrs.hnsw_idx;
     mos_t_idx_hnsw_header* index_header = hnsw_ptrs.header;
-    mos_t_idx_params_hnsw idx_params_hnsw = idx->params.hnsw;
+    mos_t_idx_params_hnsw idx_params_hnsw = index_descriptor->params.hnsw;
     mos_t_idx_hnsw_graph_config* graph_config = &idx_params_hnsw.graph_config;
 
-    idx->index_size = padded_index_size.index_total_size;
+    index_descriptor->index_size = padded_index_size.index_total_size;
     index_header->index_empty = true;
 
     //offsets
@@ -445,6 +445,7 @@ mos_idx_t_hnsw_status mos_idx_hnsw_get_nearest_neighbors_ascending_by_distance(
     uint16_t neighbors_out_capacity,
     uint16_t* neighbors_out_count
 ) {
+    UNUSED(neighbors_out_capacity);
     // candidates min-heap will store vector distances.
     // The more likely two vectors, the smaller their distance.
     mos_t_idx_hnsw_min_heap candidate_heap = {0};
@@ -464,7 +465,6 @@ mos_idx_t_hnsw_status mos_idx_hnsw_get_nearest_neighbors_ascending_by_distance(
 
     mos_t_idx_hnsw_neighbor c;
     while(mos_idx_hnsw_min_heap_pop(&candidate_heap, &c) == 0) {
-        const float* c_vector = mos_idx_hnsw_vector_at(ptrs, c.node_id, hnsw->index_header.vector_dim);
         //negate it again as result_heap stores distances negated to reuse min-heap
         float current_worst_distance = result_heap.element_count > 0 ? -result_heap.elements[0].distance : FLT_MAX;
         if(c.distance > current_worst_distance) {
@@ -533,6 +533,7 @@ void mos_idx_hnsw_select_neighbors_heuristic(
     mos_t_idx_hnsw_neighbor* selected_out, uint16_t selected_out_capacity, uint16_t* selected_out_count,
     mos_t_idx_hnsw_neighbor* discarded_out, uint16_t discarded_out_capacity, uint16_t* discarded_out_count
 ) {
+    UNUSED(query_vector);
     assert(selected_out != NULL);
     assert(selected_out_count != NULL);
     assert(selected_out_capacity > 0);
@@ -707,7 +708,7 @@ void mos_idx_hnsw_connect_neighbors(
  * @return mos_idx_t_hnsw_status
  */
 int64_t mos_idx_hnsw_put(mos_t_idx_data* idx_data, const uint8_t* key, const size_t key_len, const uint64_t value, mos_idx_put_result* result) {
-    assert(idx_data->header.index.type == MOS_IDX_HNSW);
+    assert(idx_data->header.index_desc.type == MOS_IDX_HNSW);
 
     mos_t_idx_hnsw_ptrs hnsw_ptrs = mos_idx_hnsw_get_data_ptrs(idx_data);
     mos_t_idx_hnsw* index = hnsw_ptrs.hnsw_idx;
@@ -869,21 +870,24 @@ int64_t mos_idx_hnsw_put(mos_t_idx_data* idx_data, const uint8_t* key, const siz
 }
 
 int64_t mos_idx_hnsw_get(const mos_t_idx_data* idx_data, const uint8_t* key, const size_t key_len) {
-    assert(idx_data->header.index.type == MOS_IDX_HNSW);
+    UNUSED(key);
+    UNUSED(key_len);
+    assert(idx_data->header.index_desc.type == MOS_IDX_HNSW);
 
     return -1;
 }
 
 void mos_idx_hnsw_remove(mos_t_idx_data* idx_data, const uint8_t* key, const size_t key_len) {
-    assert(idx_data->header.index.type == MOS_IDX_HNSW);
-
+    UNUSED(key);
+    UNUSED(key_len);
+    assert(idx_data->header.index_desc.type == MOS_IDX_HNSW);
 }
 
 /**
  * Searches the index data for vectors that match the query and sets a 1 in the bitmap for the matching vectors row_id.
  */
 void mos_idx_hnsw_bitmap_search(const mos_t_idx_data* idx_data, mos_t_qry_bmp* bitmap, const mos_t_qry_attr_qry* attribute_query) {
-    assert(idx_data->header.index.type == MOS_IDX_HNSW);
+    assert(idx_data->header.index_desc.type == MOS_IDX_HNSW);
 
     mos_t_idx_hnsw_ptrs hnsw_ptrs = mos_idx_hnsw_get_data_ptrs(idx_data);
     mos_t_idx_hnsw* index = hnsw_ptrs.hnsw_idx;
@@ -895,7 +899,7 @@ void mos_idx_hnsw_bitmap_search(const mos_t_idx_data* idx_data, mos_t_qry_bmp* b
 
     uint16_t dims = index_header->vector_dim;
     assert(search_vector.vector_dim == dims);
-    assert(strcmp(idx_data->header.index.attribute_name, attribute_query->attribute_name) == 0);
+    assert(strcmp(idx_data->header.index_desc.attribute_name, attribute_query->attribute_name) == 0);
 
     float query_vector[dims];
     memcpy(query_vector, search_vector.vector_val, sizeof(float) * search_vector.vector_dim);

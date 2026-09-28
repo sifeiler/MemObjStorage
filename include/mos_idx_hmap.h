@@ -38,7 +38,7 @@ typedef struct mos_t_idx_hmap {
 
 uint64_t mos_idx_murmur_hash_3_64(const uint8_t* data, const uint64_t seed, const size_t data_len);
 __uint128_t mos_idx_murmur_hash_3_128(const uint8_t* data, const uint64_t seed, const size_t data_len);
-uint64_t mos_idx_hmap_size(const uint64_t item_count, mos_t_idx* idx);
+uint64_t mos_idx_hmap_size(const uint64_t item_count, mos_t_idx_descriptor* index_descriptor);
 
 /**
  * Initializes index and index_data.
@@ -54,12 +54,12 @@ uint64_t mos_idx_hmap_size(const uint64_t item_count, mos_t_idx* idx);
  *  to keep 100% capacity at 50% utilization (linear probing).
  *
  * @param item_count max items in the index
- * @param idx the index
+ * @param index_descriptor the index descriptor
  * @param idx_data the actual index data (values)
  *  - idx_data->index_payload->index_header.table_size
  *    Aligned to next power of 2 for fast modulo
  */
-void mos_idx_hmap_init(const uint64_t item_count, mos_t_idx* idx, mos_t_idx_data* idx_data);
+void mos_idx_hmap_init(const uint64_t item_count, mos_t_idx_descriptor* index_descriptor, mos_t_idx_data* idx_data);
 
 /**
  * Creates a hash for the passed key and stores the value together with the created hash.

@@ -45,7 +45,6 @@ void test_mos_string_silo_put(int count) {
     char (*written_strings)[MAX_STRING_LEN] = calloc(count, MAX_STRING_LEN);
 
     mos_t_string_silo string_silo = {
-        .base_offset = 0,
         .size = silo_size,
         .last_deleted.str_offset = MOS_NULL_OFFSET,
         .last_deleted.str_len = 0,
@@ -56,7 +55,6 @@ void test_mos_string_silo_put(int count) {
     for(int i = 0; i < count; i++) {
         mos_t_string_desc result = {0};
 
-        char string[MAX_STRING_LEN];
         int str_len = random_string(written_strings[i], MAX_STRING_LEN - 1);
         mos_t_string mos_string = {
             .str = written_strings[i],

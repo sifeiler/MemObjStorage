@@ -24,7 +24,6 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
 
     void *silo_pointer = calloc(1, SILO_SIZE);
     mos_t_string_silo silo = {
-        .base_offset = 0,
         .size = SILO_SIZE,
         .current_offset = 0,
         .last_deleted = { .str_offset = MOS_NULL_OFFSET, .str_len = 0 }

@@ -8,6 +8,8 @@
 #include <errno.h>
 #include <stdio.h>
 
+#define UNUSED(x) (void)(x)
+
 #define VALUE_NOT_FOUND -1
 
 //Use NULL_OFFSET to indicate that something in the storage is not initialized
@@ -34,6 +36,15 @@ static inline void mos_utils_exit_program(char* exit_reason, uint64_t exit_code)
     //cleanup, free memory, etc...
 
     exit(exit_code);
+}
+
+static int mos_str_ends_with(const char* str, const char* suffix) {
+    size_t str_len = strlen(str);
+    size_t suffix_len = strlen(suffix);
+    if (suffix_len > str_len) {
+        return 0;
+    }
+    return memcmp(str + str_len - suffix_len, suffix, suffix_len) == 0;
 }
 
 #endif

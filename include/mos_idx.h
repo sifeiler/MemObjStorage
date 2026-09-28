@@ -16,7 +16,7 @@
    ========================================================================= */
 
 typedef struct mos_t_idx_data_header {
-   mos_t_idx index;
+   mos_t_idx_descriptor index_desc;
    uint64_t index_payload_offset;   //offset of index_payload in mos_t_idx_data
 } mos_t_idx_data_header;
 
@@ -32,8 +32,8 @@ typedef struct mos_idx_put_result {
 } mos_idx_put_result;
 
 typedef struct mos_t_idx_ops {
-   uint64_t (*get_index_size)(const uint64_t item_count, mos_t_idx* idx);
-   void (*init_index)(const uint64_t item_count, mos_t_idx* idx, mos_t_idx_data* idx_data);
+   uint64_t (*get_index_size)(const uint64_t item_count, mos_t_idx_descriptor* index_desc);
+   void (*init_index)(const uint64_t item_count, mos_t_idx_descriptor* index_desc, mos_t_idx_data* idx_data);
    int64_t (*put)(mos_t_idx_data* idx_data, const uint8_t* key, const size_t key_len, const uint64_t value, mos_idx_put_result* result);
    int64_t (*get)(const mos_t_idx_data* idx_data, const uint8_t* key, const size_t key_len);
    void (*bitmap_search)(const mos_t_idx_data* idx_data, mos_t_qry_bmp* bm, const mos_t_qry_attr_qry* query);
@@ -64,11 +64,12 @@ static const mos_t_idx_ops MOS_IDX_OPS_REGISTRY[] = {
    ========================================================================= */
 
 mos_t_idx_ops mos_idx_get_idx_ops(MOS_IDX_TYPE type);
-int mos_idx_get_supported_index_query_ops(mos_t_idx* index);
+int mos_idx_get_supported_index_query_ops(mos_t_idx_descriptor* index);
 uint64_t mos_idx_data_size(mos_t_config* config);
 void mos_idx_create(const mos_t_storage* storage, mos_t_config* mos_config);
 void mos_idx_put(const MOS_IDX_TYPE idx_type, mos_t_idx_data* idx_data, const uint8_t* key, const size_t key_len, const uint64_t value, mos_idx_put_result* result);
 int64_t mos_idx_get(mos_t_idx_data* id_idx_data, uint8_t* id);
+void mos_idx_set_field_index_size(uint64_t max_records, mos_t_idx_descriptor* idx_desc);
 
 static void mos_idx_bitmap_search(const MOS_IDX_TYPE idx_type, const mos_t_idx_data* idx_data, mos_t_qry_bmp* bm, const mos_t_qry_attr_qry* query) {
     mos_t_idx_ops idx_ops = MOS_IDX_OPS_REGISTRY[idx_type];
@@ -78,6 +79,13 @@ static void mos_idx_bitmap_search(const MOS_IDX_TYPE idx_type, const mos_t_idx_d
 static void mos_idx_remove_value(const MOS_IDX_TYPE idx_type, mos_t_idx_data* idx_data, const uint8_t* key, const size_t key_len) {
     mos_t_idx_ops idx_ops = MOS_IDX_OPS_REGISTRY[idx_type];
     idx_ops.remove(idx_data, key, key_len);
+}
+
+static inline mos_t_idx_data* mos_accessor_idx_data(mos_t_mapped_region* regions, uint16_t regions_count, uint16_t i) {
+   if(i >= regions_count) {
+      return NULL;
+   }
+   return (mos_t_idx_data*) (regions[i]).region_base;
 }
 
 #endif // MOS_IDX_H

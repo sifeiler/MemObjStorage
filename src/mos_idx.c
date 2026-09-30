@@ -75,7 +75,6 @@ void mos_idx_create(const mos_t_storage* storage, mos_t_config* mos_config) {
         mos_t_idx_descriptor* curr_index_desc = mmap_index_desc + i;
         mos_t_idx_data* index_data = mos_accessor_idx_data(storage->index_regions, mmap_header->index_count, i);
         index_data->header.index_payload_offset = index_data_header_size_padded;
-        mmap_index_desc->index_region_pos = i;
         //copy the index metainformation to the index_data_header before initializing the specific index (hmap, hnsw, ...)
         memcpy(&index_data->header.index_desc, curr_index_desc, sizeof(mos_t_idx_descriptor));
         mos_idx_init(mmap_header->max_records, curr_index_desc, index_data);

@@ -318,7 +318,6 @@ void mos_idx_hnsw_init(const uint64_t item_count, mos_t_idx_descriptor* index_de
     mos_t_idx_params_hnsw idx_params_hnsw = index_descriptor->params.hnsw;
     mos_t_idx_hnsw_graph_config* graph_config = &idx_params_hnsw.graph_config;
 
-    index_descriptor->index_size = padded_index_size.index_total_size;
     index_header->index_empty = true;
 
     //offsets

@@ -138,7 +138,6 @@ void mos_idx_hmap_init(uint64_t item_count, mos_t_idx_descriptor* index_desc, mo
     mos_t_idx_hmap* idx_hash_map = hmap_ptrs.hmap;
     mos_t_idx_hmap_idx_size index_size = mos_idx_hnsw_get_index_size(item_count, index_desc);
    
-    index_desc->index_size = index_size.total_index_size_page_padded;
     idx_hash_map->index_header.table_size = index_size.table_size_padded;
 
     //index values come right after the header

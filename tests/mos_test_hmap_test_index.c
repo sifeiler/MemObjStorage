@@ -28,7 +28,7 @@ void test_mos_idx_hmap_init__even_item_count(void) {
     index_data->header.index_payload_offset = MOS_PAGE_SIZE;
 
     // value will be aligned up to page size and in this case the index fits into a single page
-    uint64_t expected_index_size = MOS_PAGE_SIZE * 2;   //page 1: mos_t_idx_data_header, page 2: hmap header, page 3: hmap data
+    uint64_t expected_index_size = MOS_PAGE_SIZE * 3;   //page 1: mos_t_idx_data_header, page 2: hmap header, page 3: hmap data
     //20 * 2 = 40 -> 64 (next power of 2)
     uint64_t expected_table_size = 64;
 
@@ -62,7 +62,7 @@ void test_mos_idx_hmap_init__odd_item_count(void) {
     mos_t_idx_hmap* hash_map_index = (mos_t_idx_hmap*)(test_buffer + MOS_PAGE_SIZE);
 
     // value will be aligned up to page size and in this case the index fits into a single page
-    uint64_t expected_index_size = MOS_PAGE_SIZE * 2;   //page 1: mos_t_idx, page 2: hmap header, page 3: hmap data
+    uint64_t expected_index_size = MOS_PAGE_SIZE * 3;   //page 1: mos_t_idx, page 2: hmap header, page 3: hmap data
     //11 * 2 = 22 -> 32 (next power of 2)
     uint64_t expected_table_size = 32;
 

@@ -83,8 +83,8 @@ void mos_test_mos_init_layout__layout_correct(void) {
     uint64_t exp_record_data_size = 16;
     uint64_t exp_records_size = MOS_ALIGN_UP(100 * exp_record_size, 4096);
     uint64_t exp_index_data_size = 2 * 12288;     //2 * (padded index data header + padded header + padded values & verifiers)
-    //no string attributes, layout will have silo_size 0, but later the silo will be at least of size MOS_PAGE_SIZE
-    uint64_t exp_string_silo_size = 0;
+    //no string attributes, but silo will be at least of size MOS_PAGE_SIZE
+    uint64_t exp_string_silo_size = 4096;
 
     //Act
     mos_t_config* internal_config = mos_init_internal_config(&test_config.config);
@@ -184,6 +184,7 @@ void mos_test_mos_create_storage__check_header_area(void) {
             .next_free_row_id = 0
         },
         .string_silo = {
+            .size = 4096,
             .current_offset = 0,
             .last_deleted = {
                 .str_offset = MOS_NULL_OFFSET,
@@ -424,8 +425,8 @@ void mos_test_mos_load_storage(void) {
 
     //Assert
     TEST_ASSERT_NOT_NULL(loaded_storage);
-    TEST_ASSERT_EQUAL(expected_mmap_header->identifier, MOS_FILE_ID);
-    TEST_ASSERT_EQUAL(loaded_mmap_header->identifier, MOS_FILE_ID);
+    TEST_ASSERT_EQUAL(MOS_FILE_ID, expected_mmap_header->identifier);
+    TEST_ASSERT_EQUAL(MOS_FILE_ID, loaded_mmap_header->identifier);
 
     TEST_ASSERT_EQUAL_MEMORY(expected_header_region->region_base, loaded_header_region->region_base, expected_header_region->region_byte_size);
     TEST_ASSERT_EQUAL_MEMORY(expected_valid_bitmap_region->region_base, loaded_valid_bitmap_region->region_base, expected_valid_bitmap_region->region_byte_size);

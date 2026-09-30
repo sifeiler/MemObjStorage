@@ -238,6 +238,7 @@ void test_mos_storage_put__put_records(void) {
             .valid_bitmap_size = 4096,
             .ready_bitmap_size = 4096,
             .string_silo_size = 4096,
+            .records_size = 4096,
             .record_size = 48,
             .record_data_size = 28,
             .record_data_size_external = sizeof(TestEntry)
@@ -282,6 +283,8 @@ void test_mos_storage_put__put_records(void) {
     TEST_ASSERT_EQUAL_INT64(20, result2->prop1);
     TEST_ASSERT_EQUAL_STRING_LEN("entry11", result2->prop2.str, result2->prop2.str_len);
     TEST_ASSERT_EQUAL_INT(7, result2->prop2.str_len);
+
+    free(storage.index_regions);
 }
 
 void print_record(TestEntry* entry) {

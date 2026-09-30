@@ -130,7 +130,7 @@ void mos_init_layout(mos_t_config* cfg, mos_t_layout* layout) {
     uint64_t string_silo_size = MOS_AVG_STRING_LEN * cfg->string_attribute_count * cfg->max_records;
     // + 20%
     string_silo_size += string_silo_size * 0.2;
-    layout->string_silo_size = MOS_ALIGN_UP(string_silo_size, MOS_PAGE_SIZE);
+    layout->string_silo_size = string_silo_size > 0 ? MOS_ALIGN_UP(string_silo_size, MOS_PAGE_SIZE) : MOS_PAGE_SIZE;
 }
 
 uint64_t mos_get_current_time_millis() {
@@ -250,7 +250,7 @@ void mos_put_internal(mos_t_storage* storage, uint64_t id, void* external_record
     record_buffer_ptr->flags = 0;
     record_buffer_ptr->timestamp = mos_get_current_time_millis();
 
-    mos_t_record* record_storage = mos_accessor_record(&storage->records_region, record_row_id);
+    mos_t_record* record_storage = mos_accessor_record(&storage->records_region, record_row_id, record_size);
     memcpy(record_storage, record_buffer, record_size);
 
     //record is valid for search etc.
@@ -292,11 +292,10 @@ mos_t_config* mos_init_internal_config(mos_t_storage_config* external_cfg) {
 
     //id index
     mos_t_idx_descriptor* id_index_desc = &index_descriptors[0];
-    id_index_desc->id = MOS_ID_INDEX_POS;
+    id_index_desc->id = 0;
     id_index_desc->type = MOS_IDX_HASH_MAP;
     strncpy(id_index_desc->attribute_name, "id", MOS_ATTR_NAME_LENGTH - 2);
     id_index_desc->attribute_name[MOS_ATTR_NAME_LENGTH - 1] = '\0';
-    id_index_desc->index_region_pos = MOS_ID_INDEX_POS;
     // Very important that index_size is set here!!! This is needed for sizing the mmapped region later.
     mos_idx_set_field_index_size(external_cfg->max_records, id_index_desc);
     actual_indexes_count++;
@@ -362,6 +361,11 @@ mos_t_config* mos_init_internal_config(mos_t_storage_config* external_cfg) {
     internal_cfg->index_count = actual_indexes_count;
     internal_cfg->max_records = external_cfg->max_records;
     internal_cfg->storage_path = external_cfg->storage_path;
+
+    for(int i = 0; i < internal_cfg->index_count; i++) {
+        mos_t_idx_descriptor* index_desc = &index_descriptors[i];
+        index_desc->index_region_pos = i;
+    }
 
     return internal_cfg;
 }
@@ -482,7 +486,7 @@ mos_t_storage* mos_load_storage(const char* dir_path) {
 
     char mmap_path_header[MOS_PATH_MAX];    
     if(mos_os_path_join(mmap_path_header, sizeof(mmap_path_header), dir_path, "mos_header.mos") != 0) {
-        printf("Couldn't join path for mmapped file header. Storage load failed.\n");
+        mos_utils_report_error("Couldn't join path for mmapped file header. Storage load failed.\n");
         return NULL;
     }
 
@@ -491,7 +495,7 @@ mos_t_storage* mos_load_storage(const char* dir_path) {
 
     //at this point, we do not know the full size of the header. So map the first page, which contains the memory layout.
     if(mos_memory_region_open(mmap_path_header, header_page_size, MOS_PAGE_SIZE, &header_region_first_page) != 0) {
-        printf("Cannot load storage file. Failed to map header pages of file %s.\n", mmap_path_header);
+        mos_utils_report_error("Cannot load storage file. Failed to map header pages of file %s.\n", mmap_path_header);
         return NULL;
     }
 
@@ -505,8 +509,8 @@ mos_t_storage* mos_load_storage(const char* dir_path) {
     //the layout fits easily within the first memory page of the header
     mos_t_layout layout = mmap_header_first_page->layout;
 
-    if(mos_memory_region_close(mmap_header_first_page) != 0) {
-        printf("Cannot load storage file. Failed to unmap the first memory page (header with layout) of file %s.\n", mmap_path_header);
+    if(mos_memory_region_close(&header_region_first_page) != 0) {
+        mos_utils_report_error("Cannot load storage file. Failed to unmap the first memory page (header with layout) of file %s.\n", mmap_path_header);
         return NULL;
     }
 
@@ -535,7 +539,7 @@ mos_t_storage* mos_load_storage(const char* dir_path) {
 
     int region_open_result = 0;
     //now load the full header
-    region_open_result &= mos_memory_region_open(mmap_path_valid_bitmap, layout.header_size, MOS_PAGE_SIZE, &storage->header_region);
+    region_open_result &= mos_memory_region_open(mmap_path_header, layout.header_size, MOS_PAGE_SIZE, &storage->header_region);
     region_open_result &= mos_memory_region_open(mmap_path_valid_bitmap, layout.valid_bitmap_size, MOS_PAGE_SIZE, &storage->valid_bitmap_region);
     region_open_result &= mos_memory_region_open(mmap_path_ready_bitmap, layout.ready_bitmap_size, MOS_PAGE_SIZE, &storage->ready_bitmap_region);
     region_open_result &= mos_memory_region_open(mmap_path_records, layout.records_size, MOS_PAGE_SIZE, &storage->records_region);
@@ -653,7 +657,7 @@ mos_t_storage* mos_create_storage(const char* dir_path, mos_t_storage_config* ex
     memcpy(&(mmap_storage_header->layout), &layout, sizeof(mos_t_layout));
 
     //TODO: String silo grows bottom up. This is a leftover from earlier single mmapped-file design. This will lead to issues on resize. Fix that!!!
-    mos_t_string_silo* mmap_string_silo = mos_accessor_string_silo(&storage->string_silo_region);
+    mos_t_string_silo* mmap_string_silo = &mmap_storage_header->string_silo;
     mmap_string_silo->current_offset = 0;
     mmap_string_silo->size = layout.string_silo_size;
     mmap_string_silo->last_deleted.str_len = 0;
@@ -667,6 +671,9 @@ mos_t_storage* mos_create_storage(const char* dir_path, mos_t_storage_config* ex
     //writing storage attributes to file
     mos_t_attr* mmap_attributes = mos_accessor_header_attributes(&storage->header_region);
     memcpy(mmap_attributes, internal_cfg->attributes, sizeof(mos_t_attr) * internal_cfg->attribute_count);
+
+    mos_t_idx_descriptor* mmap_index_desc = mos_accessor_header_index_descriptors(&storage->header_region);
+    memcpy(mmap_index_desc, internal_cfg->indexes, sizeof(mos_t_idx_descriptor) * internal_cfg->index_count);
 
     mos_idx_create(storage, internal_cfg);
 
@@ -729,7 +736,7 @@ void mos_storage_put(mos_t_storage* storage, uint64_t id, void* record_data) {
     //use free record space (of older record that was deleted/evicted)
     if(last_deleted_row_id != MOS_NULL_OFFSET
         && (mos_check_record_bounds(mmap_header, last_deleted_row_id) == VALID)) {
-        mos_t_record* mmap_record = mos_accessor_record(&storage->records_region, last_deleted_row_id);
+        mos_t_record* mmap_record = mos_accessor_record(&storage->records_region, last_deleted_row_id, mmap_header->layout.record_size);
         //remember the value at last_deleted_row_id (Linked Free List) as new last_deleted_row_id
         mmap_header->state.last_deleted_row_id = *((uint64_t*)mmap_record);
         mos_put_internal(storage, id, record_data, last_deleted_row_id);
@@ -759,7 +766,7 @@ const mos_t_record* mos_storage_get_record(mos_t_storage* storage, uint64_t id) 
     uint8_t* key_ptr = (uint8_t*)&id;
     int64_t record_row_id = mos_idx_get(idx_id_data, key_ptr);
     if(record_row_id >= 0) {
-        return mos_accessor_record(&storage->records_region, record_row_id);
+        return mos_accessor_record(&storage->records_region, record_row_id, mmap_header->layout.record_size);
     }
     return NULL;
 }
@@ -808,10 +815,11 @@ const uint8_t* mos_storage_construct_external_record(mos_t_storage* storage, mos
 }
 
 const void* mos_storage_get_data_for_row_id(mos_t_storage* storage, uint64_t row_id) {
+    mos_t_header* mmap_header = mos_accessor_header(&storage->header_region);
     mos_t_qry_bmp* mmap_valid_bitmap = mos_accessor_bitmap(&storage->valid_bitmap_region);
     //there is no need to get full record if it is not valid
     if(row_id >= 0 && mos_get_bit_at_row_id(mmap_valid_bitmap, row_id)) {
-        mos_t_record* record = mos_accessor_record(&storage->records_region, row_id);
+        mos_t_record* record = mos_accessor_record(&storage->records_region, row_id, mmap_header->layout.record_size);
         return mos_storage_construct_external_record(storage, record);
     }
     return NULL;
@@ -850,7 +858,7 @@ void mos_storage_remove(mos_t_storage* storage, uint64_t id) {
     }
 
     //records are at least 64 bits
-    mos_t_record* record = mos_accessor_record(&storage->records_region, record_row_id);
+    mos_t_record* record = mos_accessor_record(&storage->records_region, record_row_id, mmap_header->layout.record_size);
     //invalidate record
     mos_t_qry_bmp* mmap_valid_bitmap = mos_accessor_bitmap(&storage->valid_bitmap_region);
     mos_set_bit_to_zero(mmap_valid_bitmap, record_row_id);

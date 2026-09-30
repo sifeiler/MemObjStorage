@@ -1,7 +1,11 @@
 /* =========================================================================
    All os specific parts for the storage library will be defined here.
-   This file provides os independet functions for memory mapping.
+   This file provides functions for memory mapping on Linux and Windows.
    ========================================================================= */
+#ifndef _GNU_SOURCE
+    #define _GNU_SOURCE
+#endif
+
 #ifndef MOS_OS_H
 #define MOS_OS_H
 

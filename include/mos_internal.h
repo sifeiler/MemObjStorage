@@ -326,8 +326,8 @@ static inline mos_t_qry_bmp* mos_accessor_bitmap(mos_t_mapped_region* region) {
     return (mos_t_qry_bmp*) region->region_base;
 }
 
-static inline mos_t_record* mos_accessor_record(mos_t_mapped_region* region, uint64_t record_row_id) {
-    return ((mos_t_record*) region->region_base) + record_row_id;
+static inline mos_t_record* mos_accessor_record(mos_t_mapped_region* region, uint64_t record_row_id, uint64_t record_size) {
+    return (mos_t_record*)((char*)region->region_base + record_row_id * record_size);
 }
 
 static const char* const MOS_IDX_TYPE_NAMES[] = {

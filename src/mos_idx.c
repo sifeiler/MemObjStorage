@@ -92,11 +92,11 @@ void mos_idx_init(const uint64_t item_count, mos_t_idx_descriptor* index_desc, m
     idx_ops.init_index(item_count, index_desc, idx_data);
 }
 
-void mos_idx_put(const MOS_IDX_TYPE idx_type, mos_t_idx_data* idx_data, const uint8_t* key, const size_t key_len, const uint64_t value, mos_idx_put_result* result) {
-    mos_t_idx_ops idx_ops = MOS_IDX_OPS_REGISTRY[idx_type];
-    idx_ops.put(idx_data, key, key_len, value, result);
+int mos_idx_put(const mos_t_idx_context* idx_context, const uint8_t* key, const size_t key_len, const uint64_t value, mos_t_idx_put_result* result) {
+    mos_t_idx_ops idx_ops = MOS_IDX_OPS_REGISTRY[idx_context->idx_type];
+    return idx_ops.put(idx_context, key, key_len, value, result);
 }
 
-int64_t mos_idx_get(mos_t_idx_data* idx_data, uint8_t* id) {
-    return mos_idx_hmap_get(idx_data, id, 8);
+int mos_idx_get(const mos_t_idx_context* idx_context, uint8_t* id, mos_t_id_list* result_list_out) {
+    return mos_idx_hmap_get(idx_context, id, 8, result_list_out);
 }

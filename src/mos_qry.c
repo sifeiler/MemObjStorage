@@ -74,15 +74,21 @@ void mos_qry_build_exec_stack(mos_t_storage* storage, mos_t_qry_bmp_exec_stack* 
     if(op & MOS_QRY_RELATIONAL_OP) {
         mos_t_header* mmap_header = mos_accessor_header(&storage->header_region);
         const mos_t_idx_descriptor* index_descriptor = mos_qry_get_index_for_search_step(mmap_index_desc, search_step, mmap_header->index_count);
+        mos_t_idx_data* index_data = mos_accessor_idx_data(storage->index_regions, mmap_header->index_count, index_descriptor->index_region_pos);
 
-        if(index_descriptor == NULL) {
-            //report_error("Cannot find index for attribute %s and operator %s.", search_step->attribute_query.attribute_name, search_step->operator);
+        if(index_descriptor == NULL || index_data == NULL) {
+            printf("Cannot find index for attribute %s and operator %s.", search_step->attribute_query.attribute_name, search_step->op);
             return;
         }
 
+        const mos_t_idx_context idx_context = {
+            .idx_data = index_data,
+            .idx_type = index_descriptor->type,
+            .kind.hmap.arena_region = &storage->arena_region
+        };
+
         curr_step->attr_query = search_step->attribute_query;
-        curr_step->idx_data = mos_accessor_idx_data(storage->index_regions, mmap_header->index_count, index_descriptor->index_region_pos);
-        curr_step->idx_type = index_descriptor->type;
+        curr_step->idx_context = idx_context;
         curr_step->sub_step_count = 0;
     } else {
         curr_step->sub_step_count = search_step->step_count;
@@ -310,7 +316,7 @@ static inline void mos_qry_execute_not(mos_t_qry_bmp_stack* stack) {
 
 static inline void mos_qry_execute_leaf(mos_t_qry_bmp_exec_step* exec, mos_t_qry_bmp_stack* stack) {
     mos_t_qry_bmp* bm = mos_qry_bitmap_free_pop(stack);
-    mos_idx_bitmap_search(exec->idx_type, exec->idx_data, bm, &exec->attr_query);
+    mos_idx_bitmap_search(&exec->idx_context, bm, &exec->attr_query);
     mos_qry_bitmap_result_push(stack, bm);
 }
 

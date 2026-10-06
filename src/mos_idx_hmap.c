@@ -18,7 +18,7 @@ typedef struct mos_t_idx_hmap_idx_size {
 
 typedef struct mos_t_idx_hmap_ptrs {
     mos_t_idx_hmap* hmap;
-    uint64_t* index_values;
+    mos_t_idx_value_node* index_values;
     uint64_t* index_verifiers;
 } mos_t_idx_hmap_ptrs;
 
@@ -104,14 +104,17 @@ mos_t_idx_hmap_idx_size mos_idx_hnsw_get_index_size(const uint64_t item_count, m
     UNUSED(index_desc);
     mos_t_idx_hmap_idx_size index_sizes;
     index_sizes.header_size_page_padded = MOS_ALIGN_UP(sizeof(mos_t_idx_hmap_header), MOS_PAGE_SIZE);
-    index_sizes.item_size = sizeof(*((mos_t_idx_hmap*)0)->data);
+    index_sizes.item_size = sizeof(mos_t_idx_value_node);
 
     //alignment to next power of 2 is important for fast modulo operations (AND)
     index_sizes.table_size_padded = mos_utils_next_pow_of_2(2 * item_count);
 
+    uint64_t values_size = sizeof(mos_t_idx_value_node) * index_sizes.table_size_padded;
+    uint64_t verifiers_size = sizeof(uint64_t) * index_sizes.table_size_padded;
+
     //Hash map should only be 50% full, so we double the table size.
     //We add the table size twice: once for the values, once for the verifiers, multiplied by the item size
-    index_sizes.index_data_size_padded = MOS_ALIGN_UP(2 * index_sizes.table_size_padded * index_sizes.item_size, MOS_PAGE_SIZE);
+    index_sizes.index_data_size_padded = MOS_ALIGN_UP(values_size + verifiers_size, MOS_PAGE_SIZE);
     
     index_sizes.total_index_size_page_padded = index_sizes.header_size_page_padded + index_sizes.index_data_size_padded;
     return index_sizes;
@@ -121,7 +124,7 @@ static inline mos_t_idx_hmap_ptrs mos_idx_hmap_get_data_ptrs(mos_t_idx_data* idx
     mos_t_idx_hmap* hmap_index = (mos_t_idx_hmap*)(((uint8_t*)idx_data) + idx_data->header.index_payload_offset);
     mos_t_idx_hmap_ptrs ptrs;
     ptrs.hmap = hmap_index;
-    ptrs.index_values = (uint64_t*)(((uint8_t*)hmap_index) + hmap_index->index_header.offset_values);
+    ptrs.index_values = (mos_t_idx_value_node*)(((uint8_t*)hmap_index) + hmap_index->index_header.offset_values);
     ptrs.index_verifiers = (uint64_t*)(((uint8_t*)hmap_index) + hmap_index->index_header.offset_verifiers);
     return ptrs;
 }
@@ -144,16 +147,16 @@ void mos_idx_hmap_init(uint64_t item_count, mos_t_idx_descriptor* index_desc, mo
     uint64_t index_values_offset = index_size.header_size_page_padded;
     idx_hash_map->index_header.offset_values = index_values_offset;
     //index verifiers come right after the index values
-    idx_hash_map->index_header.offset_verifiers = index_values_offset + (index_size.table_size_padded * sizeof(uint64_t));
+    idx_hash_map->index_header.offset_verifiers = index_values_offset + (index_size.table_size_padded * sizeof(mos_t_idx_value_node));
 }
 
-int64_t mos_idx_hmap_put(mos_t_idx_data* idx_data, const uint8_t* key, const size_t key_byte_len, const uint64_t value, mos_idx_put_result* result) {
+int mos_idx_hmap_put(const mos_t_idx_context* idx_context, const uint8_t* key, const size_t key_byte_len, const uint64_t value, mos_t_idx_put_result* result) {
     UNUSED(result);
-    mos_t_idx_hmap_ptrs hmap_ptrs = mos_idx_hmap_get_data_ptrs(idx_data);
+    mos_t_idx_hmap_ptrs hmap_ptrs = mos_idx_hmap_get_data_ptrs(idx_context->idx_data);
     mos_t_idx_hmap* index = hmap_ptrs.hmap;
     mos_t_idx_hmap_header index_header = index->index_header;
     uint64_t table_size = index_header.table_size;
-    uint64_t* index_values = hmap_ptrs.index_values;
+    mos_t_idx_value_node* index_values = hmap_ptrs.index_values;
     uint64_t* index_verifiers = hmap_ptrs.index_verifiers;
 
     __uint128_t hash = mos_idx_murmur_hash_3_128(key, MOS_IDX_MURMUR3_SEED, key_byte_len);
@@ -163,9 +166,11 @@ int64_t mos_idx_hmap_put(mos_t_idx_data* idx_data, const uint8_t* key, const siz
     uint64_t i = hash & mask;
     int64_t thombstone = -1;
     uint64_t probes = 0;
+    int key_existed = 0;
 
     while(index_verifiers[i] != MOS_IDX_EMPTY) {
         if(index_verifiers[i] == index_verifier) {
+            key_existed = 1;
             break; //found key, i is index
         }
 
@@ -192,14 +197,52 @@ int64_t mos_idx_hmap_put(mos_t_idx_data* idx_data, const uint8_t* key, const siz
         i = thombstone;
     }
 
-    index_values[i] = value;
+    mos_t_idx_value_node* index_value = &index_values[i];
+
+    if (!key_existed) {
+        // fresh slot -> initialize
+        index_value->values_count = 0;
+        index_value->capacity = MOS_IDX_VALUES_INLINED;
+        memset(&index_value->values, 0, sizeof(index_value->values));
+    }
+
+    if(index_value->values_count < MOS_IDX_VALUES_INLINED && index_value->capacity <= MOS_IDX_VALUES_INLINED) {
+        index_value->values.values_inlined[index_value->values_count] = value;
+    } else {
+        if(index_value->capacity <= MOS_IDX_VALUES_INLINED) {
+            mos_t_arena_offset arena_offset = {0};
+            uint64_t arena_capacity = MOS_IDX_VALUES_INLINED * 4 * sizeof(uint64_t);
+            if(mos_arena_allocate(idx_context->kind.hmap.arena_region, arena_capacity, &arena_offset) != 0) {
+                printf("Hmap put failed. Cannot allocate arena.\n");
+                return -1;
+            }
+
+            uint8_t* arena_block = mos_arena_accessor(idx_context->kind.hmap.arena_region, &arena_offset);
+
+            // copy over from inlined to arena
+            memcpy(arena_block, index_value->values.values_inlined, MOS_IDX_VALUES_INLINED * sizeof(uint64_t));
+            index_value->capacity = arena_capacity / sizeof(uint64_t);
+            index_value->values.arena_offset = arena_offset;
+        }
+
+        uint64_t bytes_to_skip = sizeof(uint64_t) * index_value->values_count;
+        if (mos_arena_append(idx_context->kind.hmap.arena_region, &index_value->values.arena_offset,
+                            &value, sizeof(uint64_t), bytes_to_skip) != 0) {
+            printf("Arena write failed. Cannot put value to hashmap.\n");
+            return -1;
+        }
+
+        // sync capacity as arena might have been resized during append
+        index_value->capacity = index_value->values.arena_offset.arena_size / sizeof(uint64_t);
+    }
+    index_value->values_count++;
     index_verifiers[i] = index_verifier;
 
-    return value;
+    return 0;
 }
 
-int64_t mos_idx_hmap_find_row_id(const mos_t_idx_data* idx_data, const uint8_t* key, const size_t key_byte_len) {
-    mos_t_idx_hmap_ptrs hmap_ptrs = mos_idx_hmap_get_data_ptrs(idx_data);
+int mos_idx_hmap_find_table_position(const mos_t_idx_context* idx_context, const uint8_t* key, const size_t key_byte_len, uint64_t* table_pos_out) {
+    mos_t_idx_hmap_ptrs hmap_ptrs = mos_idx_hmap_get_data_ptrs(idx_context->idx_data);
     mos_t_idx_hmap* index = hmap_ptrs.hmap;
     mos_t_idx_hmap_header index_header = index->index_header;
     uint64_t* index_verifiers = hmap_ptrs.index_verifiers;
@@ -212,7 +255,8 @@ int64_t mos_idx_hmap_find_row_id(const mos_t_idx_data* idx_data, const uint8_t* 
 
     while(index_verifiers[i] != MOS_IDX_EMPTY) {
         if(index_verifiers[i] == index_verifier) {
-            return i;
+            *table_pos_out = i;
+            return 0;
         }
         //apply linear probing to check neighbor
         i = (i + 1) & mask;
@@ -225,33 +269,53 @@ int64_t mos_idx_hmap_find_row_id(const mos_t_idx_data* idx_data, const uint8_t* 
     return VALUE_NOT_FOUND;
 }
 
-int64_t mos_idx_hmap_get(const mos_t_idx_data* idx_data, const uint8_t* key, const size_t key_len) {
-    mos_t_idx_hmap_ptrs hmap_ptrs = mos_idx_hmap_get_data_ptrs(idx_data);
-    uint64_t* index_values = hmap_ptrs.index_values;
+int mos_idx_hmap_get(const mos_t_idx_context* idx_context, const uint8_t* key, const size_t key_byte_len, mos_t_id_list* result_list_out) {
+    mos_t_idx_hmap_ptrs hmap_ptrs = mos_idx_hmap_get_data_ptrs(idx_context->idx_data);
+    mos_t_idx_value_node* index_values = hmap_ptrs.index_values;
 
-    int64_t i = mos_idx_hmap_find_row_id(idx_data, key, key_len);
+    uint64_t table_pos = UINT64_MAX;
+    if(mos_idx_hmap_find_table_position(idx_context, key, key_byte_len, &table_pos) != 0) {
+        printf("Key is not within hashmap.");
+        result_list_out->count = 0;
+        result_list_out->ids = NULL;
+        return 0;
+    }
 
-    if(i == VALUE_NOT_FOUND) {
+    mos_t_idx_value_node* index_value = &index_values[table_pos];
+
+    if(index_value->capacity <= MOS_IDX_VALUES_INLINED) {
+        result_list_out->ids = index_value->values.values_inlined;
+    } else {
+        result_list_out->ids = (uint64_t*)mos_arena_accessor(idx_context->kind.hmap.arena_region, &index_value->values.arena_offset);
+    }
+    result_list_out->count = index_value->values_count;
+    return 0;
+}
+
+int mos_idx_hmap_remove(const mos_t_idx_context* idx_context, const uint8_t* key, const size_t key_byte_len) {
+    mos_t_idx_hmap_ptrs hmap_ptrs = mos_idx_hmap_get_data_ptrs(idx_context->idx_data);
+    mos_t_idx_value_node* index_values = hmap_ptrs.index_values;
+    uint64_t* index_verifiers = hmap_ptrs.index_verifiers;
+
+    uint64_t table_pos = 0;
+    if(mos_idx_hmap_find_table_position(idx_context, key, key_byte_len, &table_pos) != 0) {
+        printf("Key is not within hashmap. Nothing to remove.");
         return VALUE_NOT_FOUND;
     }
 
-    return index_values[i];
-}
+    mos_t_idx_value_node* index_value = &index_values[table_pos];
 
-void mos_idx_hmap_remove(mos_t_idx_data* idx_data, const uint8_t* key, const size_t key_byte_len) {
-    mos_t_idx_hmap_ptrs hmap_ptrs = mos_idx_hmap_get_data_ptrs(idx_data);
-    uint64_t* index_values = hmap_ptrs.index_values;
-    uint64_t* index_verifiers = hmap_ptrs.index_verifiers;
-
-    int64_t i = mos_idx_hmap_find_row_id(idx_data, key, key_byte_len);
-
-    if(i == VALUE_NOT_FOUND) {
-        printf("Key is not within hashmap. Nothing to remove.");
-        return;
+    if(index_value->values_count <= MOS_IDX_VALUES_INLINED) {
+        memset(index_value, 0, sizeof(*index_value));
+    } else {
+        if (mos_arena_free(idx_context->kind.hmap.arena_region, &index_value->values.arena_offset) != 0) {
+            printf("Arena free failed. Cannot remove value from hashmap.\n");
+            return -1;
+        }
     }
 
-    index_values[i] = MOS_IDX_EMPTY;
-    index_verifiers[i] = MOS_IDX_THOMBSTONE;
+    index_verifiers[table_pos] = MOS_IDX_THOMBSTONE;
+    return 0;
 }
 
 static inline uint8_t* mos_idx_hmap_value_bytes(const mos_t_attr_value* v) {
@@ -276,14 +340,17 @@ static inline uint64_t mos_idx_hmap_value_length(const mos_t_attr_value* v) {
     }
 }
 
-void mos_idx_hmap_bitmap_search(const mos_t_idx_data* idx_data, mos_t_qry_bmp* bm, const mos_t_qry_attr_qry* query) {
+void mos_idx_hmap_bitmap_search(const mos_t_idx_context* idx_context, mos_t_qry_bmp* bm, const mos_t_qry_attr_qry* query) {
     uint8_t* key_ptr = mos_idx_hmap_value_bytes(&query->value);
     uint64_t len = mos_idx_hmap_value_length(&query->value);
-    int64_t record_row_id = mos_idx_hmap_get(idx_data, key_ptr, len);
-    if(record_row_id != -1) {
-        uint64_t word_index = record_row_id >> 6; // divide by 64
-        uint64_t bit_mask = 1ULL << (record_row_id & 63); // % 64
-        bm->data[word_index] |= bit_mask;
-        bm->empty = 0;
+    mos_t_id_list result_list = {0};
+    if(mos_idx_hmap_get(idx_context, key_ptr, len, &result_list) == 0) {
+        for(uint64_t i = 0; i < result_list.count; i++) {
+            uint64_t record_row_id = result_list.ids[i];
+            uint64_t word_index = record_row_id >> 6; // divide by 64
+            uint64_t bit_mask = 1ULL << (record_row_id & 63); // % 64
+            bm->data[word_index] |= bit_mask;
+            bm->empty = 0;
+        }
     }
 }

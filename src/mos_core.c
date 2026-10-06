@@ -17,6 +17,7 @@
 #include "../include/mos_qry.h"
 #include "../include/mos_string.h"
 #include "../include/mos_math.h"
+#include "../include/mos_arena.h"
 
 /* =========================================================================
    1. FORWARD DECLARATIONS
@@ -114,7 +115,6 @@ void mos_init_layout(mos_t_config* cfg, mos_t_layout* layout) {
     size_t record_data_size = cfg->attributes_byte_size_internal;
     size_t record_data_size_external = cfg->attributes_byte_size_external;
     size_t total_records_size = MOS_ALIGN_UP((single_record_size * cfg->max_records), MOS_PAGE_SIZE);
-    size_t index_data_size = MOS_ALIGN_UP(mos_calc_indexes_data_size(cfg), MOS_PAGE_SIZE);
 
     //set sizes
     layout->header_size = header_size;
@@ -124,7 +124,6 @@ void mos_init_layout(mos_t_config* cfg, mos_t_layout* layout) {
     layout->record_data_size = record_data_size;
     layout->record_data_size_external = record_data_size_external;
     layout->records_size = total_records_size;
-    layout->index_data_size = index_data_size;
 
     //later implement resizing
     uint64_t string_silo_size = MOS_AVG_STRING_LEN * cfg->string_attribute_count * cfg->max_records;
@@ -144,8 +143,15 @@ void mos_idx_id_put(mos_t_storage* storage, uint64_t id, uint64_t record_row_id)
     //first index descriptor is id index descriptor
     mos_t_idx_descriptor* mmap_id_index_desc = mos_accessor_header_index_descriptors(&storage->header_region);
     mos_t_idx_data* id_idx_data = mos_accessor_idx_data(storage->index_regions, mmap_header->index_count, mmap_id_index_desc->index_region_pos);
+    
+    const mos_t_idx_context idx_context = {
+        .idx_data = id_idx_data,
+        .idx_type = mmap_id_index_desc->type,
+        .kind.hmap.arena_region = &storage->arena_region
+    };
+    
     uint8_t* key_ptr = (uint8_t*)&id;
-    mos_idx_put(mmap_id_index_desc->type, id_idx_data, key_ptr, sizeof(id), record_row_id, NULL);
+    mos_idx_put(&idx_context, key_ptr, sizeof(id), record_row_id, NULL);
 }
 
 void mos_idx_id_remove(mos_t_storage* storage, uint64_t id, uint64_t record_row_id) {
@@ -153,8 +159,15 @@ void mos_idx_id_remove(mos_t_storage* storage, uint64_t id, uint64_t record_row_
     mos_t_header* mmap_header = mos_accessor_header(&storage->header_region);
     mos_t_idx_descriptor* mmap_id_index_desc = mos_accessor_header_index_descriptors(&storage->header_region);
     mos_t_idx_data* id_idx_data = mos_accessor_idx_data(storage->index_regions, mmap_header->index_count, mmap_id_index_desc->index_region_pos);
+    
+    const mos_t_idx_context idx_context = {
+        .idx_data = id_idx_data,
+        .idx_type = mmap_id_index_desc->type,
+        .kind.hmap.arena_region = &storage->arena_region
+    };
+    
     uint8_t* key_ptr = (uint8_t*)&id;
-    mos_idx_remove_value(mmap_id_index_desc->type, id_idx_data, key_ptr, sizeof(id));
+    mos_idx_remove_value(&idx_context, key_ptr, sizeof(id));
 }
 
 static inline mos_t_attr* mos_get_attribute_for_attribute_name(mos_t_attr* attributes, uint64_t attributes_count, const char* attribute_name) {
@@ -174,6 +187,13 @@ void mos_indexes_put(mos_t_storage* storage, uint64_t id, uint8_t* external_reco
     for (uint64_t i = 1; i < mmap_header->index_count; i++) {
         mos_t_idx_descriptor* index_descriptor = mmap_index_descriptors + i;
         mos_t_idx_data* idx_data = mos_accessor_idx_data(storage->index_regions, mmap_header->index_count, i);
+        
+        const mos_t_idx_context idx_context = {
+            .idx_data = idx_data,
+            .idx_type = index_descriptor->type,
+            .kind.hmap.arena_region = &storage->arena_region
+        };
+        
         mos_t_attr* attribute = mos_get_attribute_for_attribute_name(mmap_attributes, mmap_header->attribute_count, index_descriptor->attribute_name);
 
         uint8_t* attr_base = external_record_data + attribute->field_offset_external;
@@ -193,9 +213,9 @@ void mos_indexes_put(mos_t_storage* storage, uint64_t id, uint8_t* external_reco
         }
 
         if(attr_base) {
-            mos_idx_put_result put_result;
+            mos_t_idx_put_result put_result;
             put_result.put_result = NULL;
-            mos_idx_put(index_descriptor->type, idx_data, attr_base, byte_size, record_row_id, &put_result);
+            mos_idx_put(&idx_context, attr_base, byte_size, record_row_id, &put_result);
 
             if(put_result.put_result) {
                 uint8_t* internal_record_attr = record_data_out + attribute->field_offset_internal;
@@ -362,7 +382,7 @@ mos_t_config* mos_init_internal_config(mos_t_storage_config* external_cfg) {
     internal_cfg->max_records = external_cfg->max_records;
     internal_cfg->storage_path = external_cfg->storage_path;
 
-    for(int i = 0; i < internal_cfg->index_count; i++) {
+    for(uint64_t i = 0; i < internal_cfg->index_count; i++) {
         mos_t_idx_descriptor* index_desc = &index_descriptors[i];
         index_desc->index_region_pos = i;
     }
@@ -519,13 +539,15 @@ mos_t_storage* mos_load_storage(const char* dir_path) {
     char mmap_path_ready_bitmap[MOS_PATH_MAX];
     char mmap_path_records[MOS_PATH_MAX];
     char mmap_path_string_silo[MOS_PATH_MAX];
+    char mmap_path_arena[MOS_PATH_MAX];
 
     int path_join_result = 0;
     path_join_result &= mos_os_path_join(mmap_path_valid_bitmap, sizeof(mmap_path_valid_bitmap), dir_path, "mos_valid_bitmap.mos");
     path_join_result &= mos_os_path_join(mmap_path_ready_bitmap, sizeof(mmap_path_ready_bitmap), dir_path, "mos_ready_bitmap.mos");
     path_join_result &= mos_os_path_join(mmap_path_records, sizeof(mmap_path_records), dir_path, "mos_records.mos");
     path_join_result &= mos_os_path_join(mmap_path_string_silo, sizeof(mmap_path_string_silo), dir_path, "mos_string_silo.mos");
-    
+    path_join_result &= mos_os_path_join(mmap_path_arena, sizeof(mmap_path_arena), dir_path, "mos_arena.mos");
+
     if(path_join_result != 0) {
         printf("Couldn't join paths for mmapped files. Storage load failed.\n");
         return NULL;
@@ -544,6 +566,9 @@ mos_t_storage* mos_load_storage(const char* dir_path) {
     region_open_result &= mos_memory_region_open(mmap_path_ready_bitmap, layout.ready_bitmap_size, MOS_PAGE_SIZE, &storage->ready_bitmap_region);
     region_open_result &= mos_memory_region_open(mmap_path_records, layout.records_size, MOS_PAGE_SIZE, &storage->records_region);
     region_open_result &= mos_memory_region_open(mmap_path_string_silo, layout.string_silo_size, MOS_PAGE_SIZE, &storage->string_silo_region);
+
+    //mos_memory_region_open will figure out the real file_size to map, so just pass MOS_PAGE_SIZE
+    region_open_result &= mos_memory_region_open(mmap_path_arena, MOS_PAGE_SIZE, MOS_PAGE_SIZE, &storage->arena_region);
 
     mos_t_header* mmap_header = mos_accessor_header(&storage->header_region);
     storage->index_regions = calloc(1, mmap_header->index_count * sizeof(mos_t_mapped_region));
@@ -603,6 +628,7 @@ mos_t_storage* mos_create_storage(const char* dir_path, mos_t_storage_config* ex
     char mmap_path_ready_bitmap[MOS_PATH_MAX];
     char mmap_path_records[MOS_PATH_MAX];
     char mmap_path_string_silo[MOS_PATH_MAX];
+    char mmap_path_arena[MOS_PATH_MAX];
 
     int path_join_result = 0;
     path_join_result &= mos_os_path_join(mmap_path_header, sizeof(mmap_path_header), dir_path, "mos_header.mos");
@@ -610,7 +636,8 @@ mos_t_storage* mos_create_storage(const char* dir_path, mos_t_storage_config* ex
     path_join_result &= mos_os_path_join(mmap_path_ready_bitmap, sizeof(mmap_path_ready_bitmap), dir_path, "mos_ready_bitmap.mos");
     path_join_result &= mos_os_path_join(mmap_path_records, sizeof(mmap_path_records), dir_path, "mos_records.mos");
     path_join_result &= mos_os_path_join(mmap_path_string_silo, sizeof(mmap_path_string_silo), dir_path, "mos_string_silo.mos");
-    
+    path_join_result &= mos_os_path_join(mmap_path_arena, sizeof(mmap_path_arena), dir_path, "mos_arena.mos");
+
     if(path_join_result != 0) {
         printf("Couldn't join paths for mmapped files. Storage creation failed.\n");
         mos_free_storage_config(internal_cfg);
@@ -637,7 +664,11 @@ mos_t_storage* mos_create_storage(const char* dir_path, mos_t_storage_config* ex
     region_open_result &= mos_memory_region_open(mmap_path_ready_bitmap, layout.ready_bitmap_size, MOS_PAGE_SIZE, &storage->ready_bitmap_region);
     region_open_result &= mos_memory_region_open(mmap_path_records, layout.records_size, MOS_PAGE_SIZE, &storage->records_region);
     region_open_result &= mos_memory_region_open(mmap_path_string_silo, layout.string_silo_size, MOS_PAGE_SIZE, &storage->string_silo_region);
-    
+
+    //arena starts with MOS_PAGE_SIZE and is resized automatically if needed
+    region_open_result &= mos_memory_region_open(mmap_path_arena, MOS_PAGE_SIZE, MOS_PAGE_SIZE, &storage->arena_region);
+    mos_arena_init(&storage->arena_region);
+
     region_open_result &= mos_create_index_mmap_regions(dir_path, internal_cfg->indexes, internal_cfg->index_count, storage->index_regions);
 
     if(region_open_result != 0) {
@@ -760,17 +791,6 @@ void mos_storage_get_string(mos_t_storage* storage, mos_t_string_desc* sd, char*
     mos_string_get(storage->string_silo_region.region_base, &mmap_header->string_silo, sd, result);
 }
 
-const mos_t_record* mos_storage_get_record(mos_t_storage* storage, uint64_t id) {
-    mos_t_header* mmap_header = mos_accessor_header(&storage->header_region);
-    mos_t_idx_data* idx_id_data = mos_accessor_idx_data(storage->index_regions, mmap_header->index_count, 0);
-    uint8_t* key_ptr = (uint8_t*)&id;
-    int64_t record_row_id = mos_idx_get(idx_id_data, key_ptr);
-    if(record_row_id >= 0) {
-        return mos_accessor_record(&storage->records_region, record_row_id, mmap_header->layout.record_size);
-    }
-    return NULL;
-}
-
 /**
  * Reconstructs the user defined record from an internal record.
  * Strings are fetched from the string silo.
@@ -828,14 +848,27 @@ const void* mos_storage_get_data_for_row_id(mos_t_storage* storage, uint64_t row
 const void* mos_storage_get(mos_t_storage* storage, uint64_t id) {
     mos_t_header* mmap_header = mos_accessor_header(&storage->header_region);
     mos_t_idx_data* idx_id_data = mos_accessor_idx_data(storage->index_regions, mmap_header->index_count, MOS_ID_INDEX_POS);
-    uint8_t* key_ptr = (uint8_t*)&id;
-    int64_t record_row_id = mos_idx_get(idx_id_data, key_ptr);
 
-    if(record_row_id == VALUE_NOT_FOUND) {
+    mos_t_idx_context idx_context = {
+        .idx_data = idx_id_data,
+        .idx_type = MOS_IDX_HASH_MAP,   // id index is always of type hashmap
+        .kind = &storage->arena_region
+    };
+
+    uint8_t* key_ptr = (uint8_t*)&id;
+
+    mos_t_id_list result_ids = {0};
+    if(mos_idx_get(&idx_context, key_ptr, &result_ids) != 0) {
+        printf("Record %" PRId64 " not found.", id);
         return NULL;
     }
 
-    return mos_storage_get_data_for_row_id(storage, record_row_id);
+    if(result_ids.count != 1) {
+        printf("Cannot get record with unique id %" PRId64 ". More than one record found for this id.", id);
+        return NULL;
+    }
+
+    return mos_storage_get_data_for_row_id(storage, result_ids.ids[0]);
 }
 
 const mos_t_qry_bmp* mos_storage_search(mos_t_storage* storage, mos_t_qry* query) {
@@ -850,12 +883,26 @@ void mos_storage_remove(mos_t_storage* storage, uint64_t id) {
 
     mos_t_header* mmap_header = mos_accessor_header(&storage->header_region);
     mos_t_idx_data* idx_id_data = mos_accessor_idx_data(storage->index_regions, mmap_header->index_count, MOS_ID_INDEX_POS);
+
+    mos_t_idx_context idx_context = {
+        .idx_data = idx_id_data,
+        .idx_type = MOS_IDX_HASH_MAP,   // id index is always of type hashmap
+        .kind = &storage->arena_region
+    };
+
     uint8_t* key_ptr = (uint8_t*)&id;
-    int64_t record_row_id = mos_idx_get(idx_id_data, key_ptr);
-    if(record_row_id < 0) {
+    mos_t_id_list result_ids = {0};
+    if(mos_idx_get(&idx_context, key_ptr, &result_ids) != 0) {
         printf("Nothing to remove. Record %" PRId64 " not found.", id);
         return;
     }
+
+    if(result_ids.count != 1) {
+        printf("Cannot remove record with id %" PRId64 ". More than one record found for this id.", id);
+        return;
+    }
+
+    uint64_t record_row_id = result_ids.ids[0];
 
     //records are at least 64 bits
     mos_t_record* record = mos_accessor_record(&storage->records_region, record_row_id, mmap_header->layout.record_size);
@@ -870,11 +917,17 @@ void mos_storage_remove(mos_t_storage* storage, uint64_t id) {
         mos_t_idx_descriptor* index_descriptor = mmap_index_descriptors + i;
         mos_t_idx_data* index_data = mos_accessor_idx_data(storage->index_regions, mmap_header->index_count, index_descriptor->index_region_pos);
 
+        const mos_t_idx_context idx_context = {
+            .idx_data = index_data,
+            .idx_type = index_descriptor->type,
+            .kind.hmap.arena_region = &storage->arena_region
+        };
+
         //TODO: Rework remove. Key might not match for every index.
         mos_t_attr* attribute = mos_get_attribute_for_attribute_name(mmap_attributes, mmap_header->attribute_count, index_descriptor->attribute_name);
         uint8_t* key = record->data + attribute->field_offset_internal;
         size_t key_len = attribute->byte_size_internal;
-        mos_idx_remove_value(index_descriptor->type, index_data, key, key_len);
+        mos_idx_remove_value(&idx_context, key, key_len);
     }
     mos_idx_id_remove(storage, id, record_row_id);
 }
@@ -906,7 +959,6 @@ void mos_print_layout(mos_t_layout* layout) {
     printf("record_size %" PRIu64 "\n", layout->record_size);
     printf("record_data_size %" PRIu64 "\n", layout->record_data_size);
     printf("records_size %" PRIu64 "\n", layout->records_size);
-    printf("index_data_size %" PRIu64 "\n", layout->index_data_size);
     printf("string_silo_size %" PRIu64 "\n", layout->string_silo_size);
 }
 

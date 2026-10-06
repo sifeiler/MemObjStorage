@@ -65,6 +65,21 @@
         return fd;
     }
 
+    static inline int mos_os_file_size(int fd, uint64_t* size_out) {
+        HANDLE hFile = (HANDLE)_get_osfhandle(fd);
+        if (hFile == INVALID_HANDLE_VALUE) {
+            return -1;
+        }
+
+        LARGE_INTEGER size;
+        if (!GetFileSizeEx(hFile, &size)) {
+            return -1;
+        }
+
+        *size_out = (uint64_t)size.QuadPart;
+        return 0;
+    }
+
     static inline int mos_os_close_fd(int fd) {
         // fd here is a CRT fd from _open (matches _get_osfhandle usage in mos_os_mmap)
         return _close(fd);
@@ -164,6 +179,16 @@
         }
         int fd = open(path, flags, 0644);
         return fd;   // -1 on failure
+    }
+
+    static inline int mos_os_file_size(int fd, uint64_t* size_out) {
+        struct stat st;
+        if (fstat(fd, &st) != 0) {
+            return -1;
+        }
+
+        *size_out = (uint64_t)st.st_size;
+        return 0;
     }
 
     static inline int mos_os_close_fd(int fd) {

@@ -14,7 +14,8 @@ typedef struct mos_t_idx_hmap_header mos_t_idx_hmap_header;
 typedef struct mos_t_idx_hmap mos_t_idx_hmap;
 
 typedef struct mos_t_idx_hnsw_graph_config mos_t_idx_hnsw_graph_config;
-typedef struct mos_idx_put_result mos_idx_put_result;
+typedef struct mos_t_idx_put_result mos_t_idx_put_result;
+typedef struct mos_t_idx_context mos_t_idx_context;
 
 /* =========================================================================
    mos.h FORWARD DECLARATIONS
@@ -38,5 +39,7 @@ typedef struct mos_t_attr_value mos_t_attr_value;
 typedef struct mos_t_float_vector mos_t_float_vector;
 typedef struct mos_t_attr_config mos_t_attr_config;
 typedef struct mos_t_index_config mos_t_index_config;
+typedef struct mos_t_id_list mos_t_id_list;
+typedef struct mos_t_arena_offset mos_t_arena_offset;
 
 #endif

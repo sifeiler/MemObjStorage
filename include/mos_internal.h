@@ -102,7 +102,6 @@ typedef struct mos_t_layout {
     uint64_t record_data_size;
     uint64_t record_data_size_external;
     uint64_t records_size;
-    uint64_t index_data_size;
     uint64_t string_silo_size;
 } mos_t_layout;
 
@@ -146,14 +145,25 @@ typedef struct mos_t_idx_descriptor {
     } params;
 } mos_t_idx_descriptor;
 
+typedef struct mos_t_idx_context {
+   mos_t_idx_data* idx_data;
+   MOS_IDX_TYPE idx_type;
+   union {
+      struct {
+         mos_t_mapped_region* arena_region;
+      } hmap;
+   } kind;
+} mos_t_idx_context;
+
 typedef struct mos_t_storage {
     mos_t_mapped_region header_region;          // sizes, offsets, layout, attribute descriptors, index descriptors etc.
     mos_t_mapped_region valid_bitmap_region;    // 1 bit for every record
     mos_t_mapped_region ready_bitmap_region;    // 1 bit for every record
     mos_t_mapped_region records_region;
     mos_t_mapped_region string_silo_region;
+    mos_t_mapped_region arena_region;           // used to get dynamic memory regions. Can be used by indexes etc.
 
-    mos_t_mapped_region* index_regions;        // an array of regions, each describing one mmapped index file
+    mos_t_mapped_region* index_regions;         // an array of regions, each describing one mmapped index file
 } mos_t_storage;
 
 typedef struct mos_t_attr {
@@ -259,8 +269,7 @@ typedef struct mos_t_qry_bmp_exec_step {
     uint64_t sub_step_count;
     MOS_QRY_OPERATOR op;
     // OPTIONAL. Only available for relational exec steps (eq, gt, st, ...)
-    MOS_IDX_TYPE idx_type;
-    mos_t_idx_data* idx_data;
+    mos_t_idx_context idx_context;
     mos_t_qry_attr_qry attr_query;
     // OPTIONAL END
 } mos_t_qry_bmp_exec_step;
@@ -285,6 +294,11 @@ typedef struct mos_t_qry_bmp {
     //data is flexible, so we keep it at the end of the struct for easier allocation later.
     uint64_t data[];
 } mos_t_qry_bmp;
+
+typedef struct mos_t_id_list {
+    uint64_t count;
+    const uint64_t* ids;
+} mos_t_id_list;
 
 static_assert(offsetof(mos_t_idx_descriptor, params) == 56, "idx descriptor: params not at expected offset");
 static_assert(sizeof(mos_t_idx_descriptor) % 8 == 0, "idx descriptor: size not a multiple of 8");

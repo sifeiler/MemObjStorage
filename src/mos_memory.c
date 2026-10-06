@@ -29,15 +29,34 @@ int mos_memory_region_open(char file_path[MOS_PATH_MAX], size_t min_capacity, si
         printf("[mos_memory]: Memory region created. Aligned memory from min_capacity %zu to %zu bytes.\n", min_capacity, mmap_capacity);
 
         if(ftruncate(fd, mmap_capacity) == -1) {
-            close(fd);
+            mos_os_close_fd(fd);
             mos_utils_report_error("[mos_memory]: Cannot truncate storage file %s to size %zu.\n", file_path, mmap_capacity);
             return -1;
         }
+    } else {
+        uint64_t existing_size = 0;
+        if (mos_os_file_size(fd, &existing_size) != 0) {
+            mos_os_close_fd(fd);
+            mos_utils_report_error("[mos_memory]: Cannot stat existing region %s.\n", file_path);
+            return -1;
+        }
+
+        size_t required = MOS_ALIGN_UP(min_capacity, align_to);
+        mmap_capacity = (existing_size > required) ? (size_t)existing_size : required;
+
+        if ((size_t)existing_size < mmap_capacity) {
+            if (ftruncate(fd, (off_t)mmap_capacity) == -1) {
+                mos_os_close_fd(fd);
+                mos_utils_report_error("[mos_memory]: Cannot grow existing region %s to %zu bytes.\n", file_path, mmap_capacity);
+                return -1;
+            }
+        }
     }
+    
     void* mmap_ptr = (void*)mos_os_mmap(fd, mmap_capacity);
         
     if(!mmap_ptr) {
-        close(fd);
+        mos_os_close_fd(fd);
         mos_utils_report_error("[mos_memory]: Cannot map %zu bytes of memory for file %s.\n", mmap_capacity, file_path);
         return -1;
     }

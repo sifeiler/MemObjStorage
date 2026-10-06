@@ -57,14 +57,14 @@ void setUp(void) {
         .id = 0,
         .index_region_pos = 0,
         .type = MOS_IDX_HASH_MAP,
-        .index_size = 12288,     //padded header + padded values & verifiers
+        .index_size = 4096 * 3,     //padded header + padded values & verifiers
         .attribute_name = "id"
     };
     mos_t_idx_descriptor prop1_idx = {
         .id = 1,
         .index_region_pos = 1,
         .type = MOS_IDX_HASH_MAP,
-        .index_size = 12288,     //padded header + padded values & verifiers
+        .index_size = 4096 * 3,     //padded header + padded values & verifiers
         .attribute_name = "prop1"
     };
     test_config.indexes[0] = id_idx;
@@ -152,7 +152,7 @@ mos_t_storage setup_test_storage(void* memory, mos_t_header* h) {
         mos_t_idx_hmap* hm = (mos_t_idx_hmap*)(((uint8_t*)idx_data) + idx_data->header.index_payload_offset);
         hm->index_header.table_size = 8;
         hm->index_header.offset_values = MOS_PAGE_SIZE;
-        hm->index_header.offset_verifiers = hm->index_header.offset_values + (hm->index_header.table_size * sizeof(uint64_t));
+        hm->index_header.offset_verifiers = hm->index_header.offset_values + (hm->index_header.table_size * sizeof(mos_t_idx_value_node));
     }
 
     mos_t_attr* mmap_attributes = mos_accessor_header_attributes(header_region);
@@ -177,7 +177,6 @@ void test_mos_storage_put__put_record(void) {
         .index_descriptors_offset = 8192,
         .layout = {
             .header_size = 12288,
-            .index_data_size = 24576,
             .valid_bitmap_size = 4096,
             .ready_bitmap_size = 4096,
             .string_silo_size = 4096,
@@ -234,7 +233,6 @@ void test_mos_storage_put__put_records(void) {
         .index_descriptors_offset = 8192,
         .layout = {
             .header_size = 12288,
-            .index_data_size = 24576,
             .valid_bitmap_size = 4096,
             .ready_bitmap_size = 4096,
             .string_silo_size = 4096,

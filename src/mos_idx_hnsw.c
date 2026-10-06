@@ -706,10 +706,10 @@ void mos_idx_hnsw_connect_neighbors(
  * 
  * @return mos_idx_t_hnsw_status
  */
-int64_t mos_idx_hnsw_put(mos_t_idx_data* idx_data, const uint8_t* key, const size_t key_len, const uint64_t value, mos_idx_put_result* result) {
-    assert(idx_data->header.index_desc.type == MOS_IDX_HNSW);
+int mos_idx_hnsw_put(const mos_t_idx_context* idx_context, const uint8_t* key, const size_t key_len, const uint64_t value, mos_t_idx_put_result* result) {
+    assert(idx_context->idx_data->header.index_desc.type == MOS_IDX_HNSW);
 
-    mos_t_idx_hnsw_ptrs hnsw_ptrs = mos_idx_hnsw_get_data_ptrs(idx_data);
+    mos_t_idx_hnsw_ptrs hnsw_ptrs = mos_idx_hnsw_get_data_ptrs(idx_context->idx_data);
     mos_t_idx_hnsw* index = hnsw_ptrs.hnsw_idx;
     mos_t_idx_hnsw_header* index_header = hnsw_ptrs.header;
     
@@ -868,27 +868,28 @@ int64_t mos_idx_hnsw_put(mos_t_idx_data* idx_data, const uint8_t* key, const siz
     return MOS_IDX_HNSW_OK;
 }
 
-int64_t mos_idx_hnsw_get(const mos_t_idx_data* idx_data, const uint8_t* key, const size_t key_len) {
+int mos_idx_hnsw_get(const mos_t_idx_context* idx_context, const uint8_t* key, const size_t key_len, mos_t_id_list* result_list_out) {
     UNUSED(key);
     UNUSED(key_len);
-    assert(idx_data->header.index_desc.type == MOS_IDX_HNSW);
+    assert(idx_context->idx_data->header.index_desc.type == MOS_IDX_HNSW);
 
-    return -1;
+    return 0;
 }
 
-void mos_idx_hnsw_remove(mos_t_idx_data* idx_data, const uint8_t* key, const size_t key_len) {
+int mos_idx_hnsw_remove(const mos_t_idx_context* idx_context, const uint8_t* key, const size_t key_len) {
     UNUSED(key);
     UNUSED(key_len);
-    assert(idx_data->header.index_desc.type == MOS_IDX_HNSW);
+    assert(idx_context->idx_data->header.index_desc.type == MOS_IDX_HNSW);
+    return 0;
 }
 
 /**
  * Searches the index data for vectors that match the query and sets a 1 in the bitmap for the matching vectors row_id.
  */
-void mos_idx_hnsw_bitmap_search(const mos_t_idx_data* idx_data, mos_t_qry_bmp* bitmap, const mos_t_qry_attr_qry* attribute_query) {
-    assert(idx_data->header.index_desc.type == MOS_IDX_HNSW);
+void mos_idx_hnsw_bitmap_search(const mos_t_idx_context* idx_context, mos_t_qry_bmp* bitmap, const mos_t_qry_attr_qry* attribute_query) {
+    assert(idx_context->idx_data->header.index_desc.type == MOS_IDX_HNSW);
 
-    mos_t_idx_hnsw_ptrs hnsw_ptrs = mos_idx_hnsw_get_data_ptrs(idx_data);
+    mos_t_idx_hnsw_ptrs hnsw_ptrs = mos_idx_hnsw_get_data_ptrs(idx_context->idx_data);
     mos_t_idx_hnsw* index = hnsw_ptrs.hnsw_idx;
 
     mos_t_idx_hnsw_header* index_header = hnsw_ptrs.header;
@@ -898,7 +899,7 @@ void mos_idx_hnsw_bitmap_search(const mos_t_idx_data* idx_data, mos_t_qry_bmp* b
 
     uint16_t dims = index_header->vector_dim;
     assert(search_vector.vector_dim == dims);
-    assert(strcmp(idx_data->header.index_desc.attribute_name, attribute_query->attribute_name) == 0);
+    assert(strcmp(idx_context->idx_data->header.index_desc.attribute_name, attribute_query->attribute_name) == 0);
 
     float query_vector[dims];
     memcpy(query_vector, search_vector.vector_val, sizeof(float) * search_vector.vector_dim);

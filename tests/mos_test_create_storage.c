@@ -53,10 +53,10 @@ void setUp(void) {
 void tearDown(void) {
 }
 
-void after_test() {
-    if(test_config.storage != NULL) {
-        mos_free_storage(test_config.storage);
-        test_config.storage = NULL;
+void after_test(mos_t_storage* storage) {
+    if(storage != NULL) {
+        mos_free_storage(storage);
+        storage = NULL;
     }
 
     if(test_config.config.attributes != NULL) {
@@ -82,7 +82,6 @@ void mos_test_mos_init_layout__layout_correct(void) {
     uint64_t exp_record_size = MOS_ALIGN_UP(33, 8);
     uint64_t exp_record_data_size = 16;
     uint64_t exp_records_size = MOS_ALIGN_UP(100 * exp_record_size, 4096);
-    uint64_t exp_index_data_size = 2 * 12288;     //2 * (padded index data header + padded header + padded values & verifiers)
     //no string attributes, but silo will be at least of size MOS_PAGE_SIZE
     uint64_t exp_string_silo_size = 4096;
 
@@ -97,13 +96,12 @@ void mos_test_mos_init_layout__layout_correct(void) {
     TEST_ASSERT_EQUAL(exp_record_size, layout.record_size);
     TEST_ASSERT_EQUAL(exp_record_data_size, layout.record_data_size);
     TEST_ASSERT_EQUAL(exp_records_size, layout.records_size);
-    TEST_ASSERT_EQUAL(exp_index_data_size, layout.index_data_size);
     TEST_ASSERT_EQUAL(exp_string_silo_size, layout.string_silo_size);
 
     free(internal_config->attributes);
     free(internal_config->indexes);
     free(internal_config);
-    after_test();
+    after_test(test_config.storage);
 }
 
 void mos_test_assert_file_size(uint64_t expected_file_size, int fd) {
@@ -132,6 +130,7 @@ void mos_test_mos_create_storage__file_size(void) {
     mos_test_assert_file_size(mmap_header->layout.valid_bitmap_size, storage->valid_bitmap_region.fd);
     mos_test_assert_file_size(mmap_header->layout.ready_bitmap_size, storage->ready_bitmap_region.fd);
     mos_test_assert_file_size(mmap_header->layout.records_size, storage->records_region.fd);
+    mos_test_assert_file_size(MOS_PAGE_SIZE, storage->arena_region.fd);
 
     //no strings, so region was mapped to a single page
     mos_test_assert_file_size(MOS_PAGE_SIZE, storage->string_silo_region.fd);
@@ -151,7 +150,7 @@ void mos_test_mos_create_storage__file_size(void) {
     TEST_ASSERT_EQUAL(storage->records_region.region_byte_size, mmap_header->layout.records_size);
     TEST_ASSERT_EQUAL(storage->string_silo_region.region_byte_size, mmap_header->layout.string_silo_size);
 
-    after_test();
+    after_test(test_config.storage);
 }
 
 void mos_test_mos_create_storage__check_header_area(void) {
@@ -176,7 +175,6 @@ void mos_test_mos_create_storage__check_header_area(void) {
             .record_data_size = 16,
             .record_data_size_external = sizeof(TestEntry),
             .records_size = 4096,
-            .index_data_size = 2 * 12288,     //2 * (padded index data header + padded header + padded values & verifiers)
             .string_silo_size = 4096
         },
         .state = {
@@ -203,7 +201,7 @@ void mos_test_mos_create_storage__check_header_area(void) {
     mos_t_layout layout = mmap_header->layout;
     TEST_ASSERT_EQUAL_MEMORY((mos_t_header*)header, mmap_header, 4096);
 
-    after_test();
+    after_test(test_config.storage);
 }
 
 void mos_test_mos_create_storage__check_attribute_area(void) {
@@ -242,7 +240,7 @@ void mos_test_mos_create_storage__check_attribute_area(void) {
     //TODO: how to check the padding too?
     TEST_ASSERT_EQUAL_MEMORY(expected_attributes, mmap_attributes, expected_total_size);
 
-    after_test();
+    after_test(test_config.storage);
 }
 
 void print_storage_index(const mos_t_idx_descriptor* idx) {
@@ -275,7 +273,7 @@ void mos_test_mos_create_storage__check_index_area(void) {
     mos_t_idx_descriptor id_index = {
         .id = 0,
         .type = MOS_IDX_HASH_MAP,
-        .index_size = 12288,     //padded header + padded values & verifiers
+        .index_size = 4096 * 6,     // page-padded index data header + page-padded hmap header + page-padded values & verifiers
         .attribute_name = "id",
         .index_region_pos = 0,
         .params = {0}
@@ -283,7 +281,7 @@ void mos_test_mos_create_storage__check_index_area(void) {
     mos_t_idx_descriptor prop1_idx = {
         .id = 1,
         .type = MOS_IDX_HASH_MAP,
-        .index_size = 12288,     //padded header + padded values & verifiers
+        .index_size = 4096 * 6,     // page-padded index data header + page-padded hmap header + page-padded values & verifiers
         .attribute_name = "prop1",
         .index_region_pos = 1,
         .params = {0}
@@ -295,7 +293,7 @@ void mos_test_mos_create_storage__check_index_area(void) {
     //TODO: how to check the padding too?
     TEST_ASSERT_EQUAL_MEMORY(expected_indexes, mmap_index_descriptor, sizeof(expected_indexes));
 
-    after_test();
+    after_test(test_config.storage);
 }
 
 void mos_test_assert_regions(mos_t_mapped_region* region, const char* expected_file_name) {
@@ -328,7 +326,7 @@ void mos_test_mos_create_storage__check_regions(void) {
         mos_test_assert_regions(&test_config.storage->index_regions[i], expected_file_name);
     }
 
-    after_test();
+    after_test(test_config.storage);
 }
 
 void mos_test_mos_create_storage__check_record_area_empty(void) {
@@ -349,7 +347,7 @@ void mos_test_mos_create_storage__check_record_area_empty(void) {
     mos_t_record* records_ptr = test_config.storage->records_region.region_base;
     TEST_ASSERT_EQUAL_MEMORY(expected_zeros, records_ptr, layout.record_data_size);
 
-    after_test();
+    after_test(test_config.storage);
 }
 
 void mos_test_mos_create_storage__check_valid_bitmap_area_empty(void) {
@@ -370,7 +368,7 @@ void mos_test_mos_create_storage__check_valid_bitmap_area_empty(void) {
     mos_t_qry_bmp* valid_bitmap_ptr = test_config.storage->valid_bitmap_region.region_base;
     TEST_ASSERT_EQUAL_MEMORY(expected_zeros, valid_bitmap_ptr, layout.valid_bitmap_size);
 
-    after_test();  
+    after_test(test_config.storage);
 }
 
 void mos_test_mos_create_storage__check_ready_bitmap_area_empty(void) {
@@ -391,7 +389,7 @@ void mos_test_mos_create_storage__check_ready_bitmap_area_empty(void) {
     mos_t_qry_bmp* ready_bitmap_ptr = test_config.storage->ready_bitmap_region.region_base;
     TEST_ASSERT_EQUAL_MEMORY(expected_zeros, ready_bitmap_ptr, layout.ready_bitmap_size);
 
-    after_test();  
+    after_test(test_config.storage);
 }
 
 void mos_test_mos_load_storage(void) {
@@ -438,6 +436,7 @@ void mos_test_mos_load_storage(void) {
         TEST_ASSERT_EQUAL_MEMORY(expected_indexes_regions[i].region_base, loaded_indexes_regions[i].region_base, expected_indexes_regions[i].region_byte_size);
     }
     
+    after_test(test_config.storage);
     mos_free_storage(loaded_storage);
 }
 

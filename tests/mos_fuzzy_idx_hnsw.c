@@ -153,7 +153,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
             mos_math_sanitize_and_normalize(vector, vector_dim);
             pos += vector_byte_size;
 
-            mos_idx_put_result result;
+            mos_t_idx_put_result result;
             mos_idx_hnsw_put(idx_data, (uint8_t*)vector, vector_byte_size, i, &result);
 
             //for assertion
@@ -203,7 +203,12 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
         bmp->nWords = nWords;
         memset(bmp->data, 0, nWords * sizeof(uint64_t));
 
-        mos_idx_bitmap_search(MOS_IDX_HNSW, idx_data, bmp, &qry);
+        const mos_t_idx_context idx_context = {
+            .idx_data = idx_data,
+            .idx_type = MOS_IDX_HNSW
+        };
+
+        mos_idx_bitmap_search(&idx_context, bmp, &qry);
 
         uint64_t actual_count = mos_qry_bmp_count_ones(bmp);
 

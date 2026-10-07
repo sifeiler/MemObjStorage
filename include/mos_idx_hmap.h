@@ -102,15 +102,27 @@ int mos_idx_hmap_put(const mos_t_idx_context* idx_context, const uint8_t* key, c
 int mos_idx_hmap_get(const mos_t_idx_context* idx_context, const uint8_t* key, const size_t key_len, mos_t_id_list* result_list_out);
 
 /**
- * Removes a value for the passed key. Flags the gap in the hash table in order to be reused on next `mos_idx_hmap_put`.
+ * Removes the passed key with all of its values. Flags the gap in the hash table in order to be reused on next put.
  * 
  * @param idx_context contains index metainformation and the index data itself.
- * @param key the value to create the actual hash from, which is used for the hash table lookup. Typically a unique value that identifies the indexed item.
+ * @param key the key to create the actual hash from, which is used for the hash table lookup. Typically a unique id that identifies the indexed item.
  * @param key_len the byte length of the key
  * 
  * @return -1 on any issues, 0 if remove was successful.
  */
-int mos_idx_hmap_remove(const mos_t_idx_context* idx_context, const uint8_t* key, const size_t key_len);
+int mos_idx_hmap_remove_key(const mos_t_idx_context* idx_context, const uint8_t* key, const size_t key_len);
+
+/**
+ * Removes a value for the passed key.
+ * 
+ * @param idx_context contains index metainformation and the index data itself.
+ * @param key the key to create the actual hash from, which is used for the hash table lookup. Typically a unique id that identifies the indexed item.
+ * @param key_len the byte length of the key
+ * @param value the value that will be removed from the bucket referenced by the key
+ * 
+ * @return -1 on any issues, 0 if remove was successful.
+ */
+int mos_idx_hmap_remove_value(const mos_t_idx_context* idx_context, const uint8_t* key, const size_t key_len, uint64_t value);
 
 /**
  * Searches the index data for a value and sets a 1 in the `bitmap` output parameter, for every match in the index.

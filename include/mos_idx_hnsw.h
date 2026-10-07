@@ -104,7 +104,7 @@ void mos_idx_hnsw_init(const uint64_t item_count, mos_t_idx_descriptor* index_de
 
 int mos_idx_hnsw_put(const mos_t_idx_context* idx_context, const uint8_t* key, const size_t key_len, const uint64_t value, mos_t_idx_put_result* result);
 int mos_idx_hnsw_get(const mos_t_idx_context* idx_context, const uint8_t* key, const size_t key_len, mos_t_id_list* result_list_out);
-int mos_idx_hnsw_remove(const mos_t_idx_context* idx_context, const uint8_t* key, const size_t key_len);
+int mos_idx_hnsw_remove_key(const mos_t_idx_context* idx_context, const uint8_t* key, const size_t key_len);
 
 /**
  * Searches the index data for vectors that are closest to the query vector and sets a 1 in the bitmap for the closest vectors row_ids.

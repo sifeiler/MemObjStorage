@@ -37,17 +37,19 @@ typedef struct mos_t_idx_ops {
    int (*put)(const mos_t_idx_context* idx_context, const uint8_t* key, const size_t key_len, const uint64_t value, mos_t_idx_put_result* result);
    int (*get)(const mos_t_idx_context* idx_context, const uint8_t* key, const size_t key_len, mos_t_id_list* result_list_out);
    void (*bitmap_search)(const mos_t_idx_context* idx_context, mos_t_qry_bmp* bm, const mos_t_qry_attr_qry* query);
-   int (*remove)(const mos_t_idx_context* idx_context, const uint8_t* key, const size_t key_len);
+   int (*remove_key)(const mos_t_idx_context* idx_context, const uint8_t* key, const size_t key_len);
+   int (*remove_value)(const mos_t_idx_context* idx_context, const uint8_t* key, const size_t key_len, uint64_t value);
 } mos_t_idx_ops;
 
 static const mos_t_idx_ops MOS_IDX_OPS_REGISTRY[] = {
     [MOS_IDX_HASH_MAP] = {
-        .get_index_size = mos_idx_hmap_size,
-        .init_index = mos_idx_hmap_init,
-        .put = mos_idx_hmap_put,
-        .get = mos_idx_hmap_get,
-        .bitmap_search = mos_idx_hmap_bitmap_search,
-        .remove = mos_idx_hmap_remove
+         .get_index_size = mos_idx_hmap_size,
+         .init_index = mos_idx_hmap_init,
+         .put = mos_idx_hmap_put,
+         .get = mos_idx_hmap_get,
+         .bitmap_search = mos_idx_hmap_bitmap_search,
+         .remove_key = mos_idx_hmap_remove_key,
+         .remove_value = mos_idx_hmap_remove_value
     },
     [MOS_IDX_HNSW] = {
          .get_index_size = mos_idx_hnsw_size,
@@ -55,7 +57,8 @@ static const mos_t_idx_ops MOS_IDX_OPS_REGISTRY[] = {
          .put = mos_idx_hnsw_put,
          .get = mos_idx_hnsw_get,
          .bitmap_search = mos_idx_hnsw_bitmap_search,
-         .remove = mos_idx_hnsw_remove
+         .remove_key = mos_idx_hnsw_remove_key,
+         .remove_value = NULL
     }
 };
 
@@ -76,9 +79,19 @@ static void mos_idx_bitmap_search(const mos_t_idx_context* idx_context, mos_t_qr
    idx_ops.bitmap_search(idx_context, bm, query);
 }
 
-static int mos_idx_remove_value(const mos_t_idx_context* idx_context, const uint8_t* key, const size_t key_len) {
+static int mos_idx_remove_value(const mos_t_idx_context* idx_context, const uint8_t* key, const size_t key_len, const uint64_t value) {
    mos_t_idx_ops idx_ops = MOS_IDX_OPS_REGISTRY[idx_context->idx_type];
-   return idx_ops.remove(idx_context, key, key_len);
+
+   if (idx_ops.remove_value == NULL) {
+        return -1;
+    }
+
+   return idx_ops.remove_value(idx_context, key, key_len, value);
+}
+
+static int mos_idx_remove_key(const mos_t_idx_context* idx_context, const uint8_t* key, const size_t key_len) {
+   mos_t_idx_ops idx_ops = MOS_IDX_OPS_REGISTRY[idx_context->idx_type];
+   return idx_ops.remove_key(idx_context, key, key_len);
 }
 
 static inline mos_t_idx_data* mos_accessor_idx_data(mos_t_mapped_region* regions, uint16_t regions_count, uint16_t i) {

@@ -876,7 +876,7 @@ int mos_idx_hnsw_get(const mos_t_idx_context* idx_context, const uint8_t* key, c
     return 0;
 }
 
-int mos_idx_hnsw_remove(const mos_t_idx_context* idx_context, const uint8_t* key, const size_t key_len) {
+int mos_idx_hnsw_remove_key(const mos_t_idx_context* idx_context, const uint8_t* key, const size_t key_len) {
     UNUSED(key);
     UNUSED(key_len);
     assert(idx_context->idx_data->header.index_desc.type == MOS_IDX_HNSW);

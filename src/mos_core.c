@@ -154,8 +154,7 @@ void mos_idx_id_put(mos_t_storage* storage, uint64_t id, uint64_t record_row_id)
     mos_idx_put(&idx_context, key_ptr, sizeof(id), record_row_id, NULL);
 }
 
-void mos_idx_id_remove(mos_t_storage* storage, uint64_t id, uint64_t record_row_id) {
-    UNUSED(record_row_id);
+void mos_idx_id_remove(mos_t_storage* storage, uint64_t id) {
     mos_t_header* mmap_header = mos_accessor_header(&storage->header_region);
     mos_t_idx_descriptor* mmap_id_index_desc = mos_accessor_header_index_descriptors(&storage->header_region);
     mos_t_idx_data* id_idx_data = mos_accessor_idx_data(storage->index_regions, mmap_header->index_count, mmap_id_index_desc->index_region_pos);
@@ -167,7 +166,7 @@ void mos_idx_id_remove(mos_t_storage* storage, uint64_t id, uint64_t record_row_
     };
     
     uint8_t* key_ptr = (uint8_t*)&id;
-    mos_idx_remove_value(&idx_context, key_ptr, sizeof(id));
+    mos_idx_remove_key(&idx_context, key_ptr, sizeof(id));
 }
 
 static inline mos_t_attr* mos_get_attribute_for_attribute_name(mos_t_attr* attributes, uint64_t attributes_count, const char* attribute_name) {
@@ -927,9 +926,9 @@ void mos_storage_remove(mos_t_storage* storage, uint64_t id) {
         mos_t_attr* attribute = mos_get_attribute_for_attribute_name(mmap_attributes, mmap_header->attribute_count, index_descriptor->attribute_name);
         uint8_t* key = record->data + attribute->field_offset_internal;
         size_t key_len = attribute->byte_size_internal;
-        mos_idx_remove_value(&idx_context, key, key_len);
+        mos_idx_remove_value(&idx_context, key, key_len, record_row_id);
     }
-    mos_idx_id_remove(storage, id, record_row_id);
+    mos_idx_id_remove(storage, id);
 }
 
 void mos_print_header(mos_t_header* header) {

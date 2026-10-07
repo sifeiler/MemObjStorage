@@ -4,6 +4,7 @@
 #include <inttypes.h>
 #include "mos_memory.h"
 #include "mos_internal.h"
+#include "mos_math.h"
 
 #define MOS_MIN_ARENA_ALLOC 16         // must stay a power of two (for uint64_t alignment) AND >= sizeof(mos_t_arena_offset)
 
@@ -37,7 +38,7 @@ static inline int mos_arena_init(mos_t_mapped_region* arena_region) {
     mmap_arena_region_header->identifier = MOS_FILE_ID;
     mmap_arena_region_header->last_deleted_offset.arena_offset = MOS_NULL_OFFSET;
     mmap_arena_region_header->last_deleted_offset.arena_size = MOS_NULL_OFFSET;
-    mmap_arena_region_header->next_free_offset = 0;
+    mmap_arena_region_header->next_free_offset = MOS_ALIGN_UP(sizeof(mos_t_arena_region_header), MOS_PAGE_SIZE);
     return 0;
 }
 
@@ -104,7 +105,8 @@ static inline int mos_arena_free(mos_t_mapped_region* mmap_arena_region, mos_t_a
         block_link->arena_offset = MOS_NULL_OFFSET;
         block_link->arena_size = 0;
     } else {
-        *block_link = *last_deleted_offset;
+        mos_t_arena_offset* last_deleted_offset_block = (mos_t_arena_offset*)mos_arena_accessor(mmap_arena_region, last_deleted_offset);
+        *block_link = *last_deleted_offset_block;
     }
 
     last_deleted_offset->arena_offset = arena_offset->arena_offset;
@@ -140,6 +142,7 @@ static inline int mos_arena_append(mos_t_mapped_region* arena, mos_t_arena_offse
             return -1;
         }
 
+        // TODO: Try to append to old_arena, though difficult to figure out if area next to old arena is free and big enough.
         if (old.arena_offset != MOS_NULL_OFFSET) {
             uint8_t* old_block = mos_arena_accessor(arena, &old);
             uint8_t* new_block = mos_arena_accessor(arena, &fresh);

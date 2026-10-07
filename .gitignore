@@ -11,3 +11,4 @@ tests/tmp
 tests/*
 !tests/*.c
 !tests/*.h
+crash*

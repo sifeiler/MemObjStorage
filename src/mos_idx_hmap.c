@@ -275,7 +275,7 @@ int mos_idx_hmap_get(const mos_t_idx_context* idx_context, const uint8_t* key, c
 
     uint64_t table_pos = UINT64_MAX;
     if(mos_idx_hmap_find_table_position(idx_context, key, key_byte_len, &table_pos) != 0) {
-        printf("Key is not within hashmap.");
+        printf("Key is not within hashmap.\n");
         result_list_out->count = 0;
         result_list_out->ids = NULL;
         return 0;
@@ -292,14 +292,14 @@ int mos_idx_hmap_get(const mos_t_idx_context* idx_context, const uint8_t* key, c
     return 0;
 }
 
-int mos_idx_hmap_remove(const mos_t_idx_context* idx_context, const uint8_t* key, const size_t key_byte_len) {
+int mos_idx_hmap_remove_key(const mos_t_idx_context* idx_context, const uint8_t* key, const size_t key_byte_len) {
     mos_t_idx_hmap_ptrs hmap_ptrs = mos_idx_hmap_get_data_ptrs(idx_context->idx_data);
     mos_t_idx_value_node* index_values = hmap_ptrs.index_values;
     uint64_t* index_verifiers = hmap_ptrs.index_verifiers;
 
     uint64_t table_pos = 0;
     if(mos_idx_hmap_find_table_position(idx_context, key, key_byte_len, &table_pos) != 0) {
-        printf("Key is not within hashmap. Nothing to remove.");
+        printf("Key is not within hashmap. Nothing to remove.\n");
         return VALUE_NOT_FOUND;
     }
 
@@ -315,6 +315,14 @@ int mos_idx_hmap_remove(const mos_t_idx_context* idx_context, const uint8_t* key
     }
 
     index_verifiers[table_pos] = MOS_IDX_THOMBSTONE;
+    return 0;
+}
+
+int mos_idx_hmap_remove_value(const mos_t_idx_context* idx_context, const uint8_t* key, const size_t key_len, uint64_t value) {
+    UNUSED(idx_context);
+    UNUSED(key);
+    UNUSED(key_len);
+    UNUSED(value);
     return 0;
 }
 

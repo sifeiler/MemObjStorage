@@ -213,7 +213,7 @@ int mos_idx_hmap_put(const mos_t_idx_context* idx_context, const uint8_t* key, c
             mos_t_arena_offset arena_offset = {0};
             uint64_t arena_capacity = MOS_IDX_VALUES_INLINED * 4 * sizeof(uint64_t);
             if(mos_arena_allocate(idx_context->kind.hmap.arena_region, arena_capacity, &arena_offset) != 0) {
-                printf("Hmap put failed. Cannot allocate arena.\n");
+                printf("[mos_idx_hmap]: Hmap put failed. Cannot allocate arena.\n");
                 return -1;
             }
 
@@ -228,7 +228,7 @@ int mos_idx_hmap_put(const mos_t_idx_context* idx_context, const uint8_t* key, c
         uint64_t bytes_to_skip = sizeof(uint64_t) * index_value->values_count;
         if (mos_arena_append(idx_context->kind.hmap.arena_region, &index_value->values.arena_offset,
                             &value, sizeof(uint64_t), bytes_to_skip) != 0) {
-            printf("Arena write failed. Cannot put value to hashmap.\n");
+            printf("[mos_idx_hmap]: Arena write failed. Cannot put value to hashmap.\n");
             return -1;
         }
 
@@ -275,7 +275,7 @@ int mos_idx_hmap_get(const mos_t_idx_context* idx_context, const uint8_t* key, c
 
     uint64_t table_pos = UINT64_MAX;
     if(mos_idx_hmap_find_table_position(idx_context, key, key_byte_len, &table_pos) != 0) {
-        printf("Key is not within hashmap.\n");
+        printf("[mos_idx_hmap]: Key is not within hashmap.\n");
         result_list_out->count = 0;
         result_list_out->ids = NULL;
         return 0;
@@ -299,7 +299,7 @@ int mos_idx_hmap_remove_key(const mos_t_idx_context* idx_context, const uint8_t*
 
     uint64_t table_pos = 0;
     if(mos_idx_hmap_find_table_position(idx_context, key, key_byte_len, &table_pos) != 0) {
-        printf("Key is not within hashmap. Nothing to remove.\n");
+        printf("[mos_idx_hmap]: Key is not within hashmap. Nothing to remove.\n");
         return VALUE_NOT_FOUND;
     }
 
@@ -309,7 +309,7 @@ int mos_idx_hmap_remove_key(const mos_t_idx_context* idx_context, const uint8_t*
         memset(index_value, 0, sizeof(*index_value));
     } else {
         if (mos_arena_free(idx_context->kind.hmap.arena_region, &index_value->values.arena_offset) != 0) {
-            printf("Arena free failed. Cannot remove value from hashmap.\n");
+            printf("[mos_idx_hmap]: Arena free failed. Cannot remove value from hashmap.\n");
             return -1;
         }
     }

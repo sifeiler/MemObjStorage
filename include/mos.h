@@ -26,22 +26,26 @@ typedef enum MOS_IDX_TYPE {
 // Only store integers anywhere the enum is used.
 // Otherwise it might get messy due to different compilers and mmapping.
 typedef enum MOS_ATTR_TYPE {
-    MOS_ATTR_MIN = 0,
-
-    MOS_ATTR_TYPE_UINT64 = 0,
-    MOS_ATTR_TYPE_TIMESTAMP = 1,
-    MOS_ATTR_TYPE_STRING = 2,
-    MOS_ATTR_TYPE_VECTOR = 3,
+    MOS_ATTR_MIN =              1 << 0,
+    MOS_ATTR_TYPE_UINT64 =      1 << 1,
+    MOS_ATTR_TYPE_TIMESTAMP =   1 << 2,
+    MOS_ATTR_TYPE_STRING =      1 << 3,
+    MOS_ATTR_TYPE_VECTOR =      1 << 4,
     MOS_ATTR_MAX
 } MOS_ATTR_TYPE;
+
+#define MOS_ATTR_TYPES_GROUPABLE MOS_ATTR_TYPE_UINT64
+
+//static_assert(MOS_ATTR_TYPES_GROUPABLE <= UINT8_MAX, "flag does not fit in uint8_t");
 
 typedef struct mos_t_attr_config {
     uint64_t byte_size;
     uint64_t field_offset;                 // byte offset in user provided struct
     char name[MOS_ATTR_NAME_LENGTH];
     uint8_t type;                          // MOS_ATTR_TYPE
-    uint8_t indexed;
-    uint8_t  _pad[2];
+    uint8_t indexed;                       // if 1 -> at least one index has to exist for this attribute
+    uint8_t groupable;                     // if 1 -> the attribute can later be queried with the EXPAND operation
+    uint8_t  _pad[5];
 } mos_t_attr_config;
 
 typedef struct mos_t_idx_hnsw_graph_config {

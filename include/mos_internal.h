@@ -43,6 +43,10 @@ typedef enum MOS_ATTR_TYPE_INTERNAL {
     MOS_ATTR_TYPE_INTERNAL_HNSW_NODE = 1 << 3
 } MOS_ATTR_TYPE_INTERNAL;
 
+// xxxx xxgi -> g = groupable, i = indexed
+#define MOS_ATTR_FLAG_INDEXED   (1u << 0)   // 0x01
+#define MOS_ATTR_FLAG_GROUPABLE (1u << 1)   // 0x02
+
 static const uint8_t EXTERNAL_TYPE_SIZES[] = {
     [MOS_ATTR_TYPE_UINT64] = sizeof(uint64_t),
     [MOS_ATTR_TYPE_TIMESTAMP] = sizeof(uint64_t),
@@ -145,16 +149,6 @@ typedef struct mos_t_idx_descriptor {
     } params;
 } mos_t_idx_descriptor;
 
-typedef struct mos_t_idx_context {
-   mos_t_idx_data* idx_data;
-   MOS_IDX_TYPE idx_type;
-   union {
-      struct {
-         mos_t_mapped_region* arena_region;
-      } hmap;
-   } kind;
-} mos_t_idx_context;
-
 typedef struct mos_t_storage {
     mos_t_mapped_region header_region;          // sizes, offsets, layout, attribute descriptors, index descriptors etc.
     mos_t_mapped_region valid_bitmap_region;    // 1 bit for every record
@@ -174,9 +168,28 @@ typedef struct mos_t_attr {
     uint64_t field_offset_internal; // byte offset in internal stored record. mos_t_record.data is base
     char name[MOS_ATTR_NAME_LENGTH];
     uint8_t type;                   // MOS_ATTR_TYPE_INTERNAL
-    uint8_t indexed;
+    uint8_t flags;                  // xxxx xxgi -> g = groupable, i = indexed
     uint8_t  _pad[6];
 } mos_t_attr;
+
+typedef struct mos_t_idx_context {
+    mos_t_idx_data* idx_data;
+    MOS_IDX_TYPE idx_type;
+
+    union {
+        struct {
+            mos_t_mapped_region* header_region;
+            mos_t_mapped_region* arena_region;
+            mos_t_mapped_region* records_region;
+        } hmap;
+    } kind;
+
+    union {
+        struct {
+            mos_t_attr expand_attr;
+        } expand;
+    } operation;
+} mos_t_idx_context;
 
 typedef struct mos_t_config {
     uint64_t max_records;
@@ -222,11 +235,12 @@ typedef struct mos_t_qry_attr_qry {
 //Search engine structs
 //bitmask only for easier comparision
 typedef enum MOS_QRY_OPERATOR {
-    MOS_QRY_OP_OR   = 1 << 0,
-    MOS_QRY_OP_AND  = 1 << 1,
-    MOS_QRY_OP_NOT  = 1 << 2,
-    MOS_QRY_OP_EQ   = 1 << 3,
-    MOS_QRY_OP_SIMILAR     = 1 << 4
+    MOS_QRY_OP_OR       = 1 << 0,
+    MOS_QRY_OP_AND      = 1 << 1,
+    MOS_QRY_OP_NOT      = 1 << 2,
+    MOS_QRY_OP_EQ       = 1 << 3,
+    MOS_QRY_OP_SIMILAR  = 1 << 4,
+    MOS_QRY_OP_EXPAND   = 1 << 5
 } MOS_QRY_OPERATOR;
 
 typedef struct mos_t_qry_search_step {
@@ -327,6 +341,17 @@ static inline mos_t_attr* mos_accessor_header_attributes(mos_t_mapped_region* re
     return (mos_t_attr*) ((char*)region->region_base + h->attributes_offset);
 }
 
+static inline mos_t_attr* mos_accessor_header_attribute(mos_t_mapped_region* region, char attr_name[MOS_ATTR_NAME_LENGTH]) {
+    mos_t_header* h = mos_accessor_header(region);
+    mos_t_attr* attributes = mos_accessor_header_attributes(region);
+    for(uint64_t i = 0; h->attribute_count; i++) {
+        if(strcmp(attributes[i].name, attr_name) == 0) {
+            return &attributes[i];
+        }
+    }
+    return NULL;
+}
+
 static inline mos_t_idx_descriptor* mos_accessor_header_index_descriptors(mos_t_mapped_region* region) {
     mos_t_header* h = (mos_t_header*) region->region_base;
     return (mos_t_idx_descriptor*) ((char*)region->region_base + h->index_descriptors_offset);
@@ -342,6 +367,10 @@ static inline mos_t_qry_bmp* mos_accessor_bitmap(mos_t_mapped_region* region) {
 
 static inline mos_t_record* mos_accessor_record(mos_t_mapped_region* region, uint64_t record_row_id, uint64_t record_size) {
     return (mos_t_record*)((char*)region->region_base + record_row_id * record_size);
+}
+
+static inline mos_t_record* mos_accessor_record_attribute(mos_t_record* record, mos_t_attr* attribute) {
+    return (uint8_t*)(record->data[attribute->field_offset_internal]);
 }
 
 static const char* const MOS_IDX_TYPE_NAMES[] = {

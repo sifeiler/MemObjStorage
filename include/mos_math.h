@@ -22,12 +22,7 @@ typedef enum MOS_T_IDX_HNSW_METRIC {
      */
     METRIC_COSINE = 1,
 
-    /**typedef struct mos_t_attr_info {
-    char name[32];
-    MOS_ATTR_TYPE type;
-    uint64_t byte_size;
-    uint64_t record_offset;            // byte offset in user record
-} mos_t_attr_info;
+    /**
      * Dot Product.
      * Measures the projection of one vector onto another.
      * Frequently used for normalized vectors.

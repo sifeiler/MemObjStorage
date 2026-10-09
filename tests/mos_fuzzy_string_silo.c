@@ -54,7 +54,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
             shadow[live_count].alive = 1;
             live_count++;
             pos += len;
-            printf("[Step G %d][Step L %d] PUT: len=%d, offset=%lu, capacity=%d\n", step, local_step, len, (unsigned long)result.str_offset, result.str_len);
+            printf("[mos_fuzzy_string_silo]: [Step G %d][Step L %d] PUT: len=%d, offset=%lu, capacity=%d\n", step, local_step, len, (unsigned long)result.str_offset, result.str_len);
         } else if (live_count > 0) {
             int idx = data[pos++] % live_count;
             if (shadow[idx].alive) {
@@ -63,7 +63,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
                 }
                 shadow[idx].alive = 0;
             }
-            printf("[Step G %d][Step L %d] REMOVE: index=%d, offset=%lu\n", step, local_step, idx, (unsigned long)shadow[idx].desc.str_offset);
+            printf("[mos_fuzzy_string_silo]: [Step G %d][Step L %d] REMOVE: index=%d, offset=%lu\n", step, local_step, idx, (unsigned long)shadow[idx].desc.str_offset);
         }
 
         // invariant check: every live string still reads back correctly

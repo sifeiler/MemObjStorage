@@ -60,7 +60,7 @@ int mos_string_put(void* silo_pointer, mos_t_string_silo* string_silo, mos_t_str
         string_silo->current_offset = current_offset;
         return 0;
     } else {
-        printf("Cannot store string. String silo is full. You need to resize.");
+        printf("[mos_string]: Cannot store string. String silo is full. You need to resize.\n");
         return -1;
     }
 }

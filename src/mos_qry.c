@@ -65,41 +65,70 @@ const mos_t_idx_descriptor* mos_qry_get_index_for_search_step(mos_t_idx_descript
     return NULL;
 }
 
-void mos_qry_build_exec_stack(mos_t_storage* storage, mos_t_qry_bmp_exec_stack* exec_stack, mos_t_qry_search_step* search_step) {
+int mos_qry_build_exec_stack(mos_t_storage* storage, mos_t_qry_bmp_exec_stack* exec_stack, mos_t_qry_search_step* search_step) {
     mos_t_qry_bmp_exec_step* curr_step = exec_stack->exec_steps[exec_stack->top];
     MOS_QRY_OPERATOR op = search_step->op;
     curr_step->op = op;
 
     mos_t_idx_descriptor* mmap_index_desc = mos_accessor_header_index_descriptors(&storage->header_region);
-    if(op & MOS_QRY_RELATIONAL_OP) {
-        mos_t_header* mmap_header = mos_accessor_header(&storage->header_region);
+    mos_t_header* mmap_header = mos_accessor_header(&storage->header_region);
+
+    if(op & (MOS_QRY_RELATIONAL_OP | MOS_QRY_OP_EXPAND)) {
         const mos_t_idx_descriptor* index_descriptor = mos_qry_get_index_for_search_step(mmap_index_desc, search_step, mmap_header->index_count);
         mos_t_idx_data* index_data = mos_accessor_idx_data(storage->index_regions, mmap_header->index_count, index_descriptor->index_region_pos);
 
         if(index_descriptor == NULL || index_data == NULL) {
-            printf("Cannot find index for attribute %s and operator %s.", search_step->attribute_query.attribute_name, search_step->op);
-            return;
+            printf("[mos qry]: Cannot find index for attribute %s and operator %s.\n", search_step->attribute_query.attribute_name, search_step->op);
+            return -1;
         }
 
-        const mos_t_idx_context idx_context = {
+        mos_t_idx_context idx_context = {
             .idx_data = index_data,
             .idx_type = index_descriptor->type,
-            .kind.hmap.arena_region = &storage->arena_region
+            .kind.hmap.arena_region = &storage->arena_region,
+            .kind.hmap.header_region = &storage->header_region
         };
 
-        curr_step->attr_query = search_step->attribute_query;
-        curr_step->idx_context = idx_context;
-        curr_step->sub_step_count = 0;
+        if(op & MOS_QRY_OP_EXPAND) {
+            if(search_step->step_count != 1) {
+                printf("[mos qry]: EXPAND operation needs exactly one subquery! Invalid query.\n");
+                return -1;
+            }
+
+            mos_t_attr* attribute = mos_accessor_header_attribute(&storage->header_region, index_descriptor->attribute_name);
+
+            if(attribute == NULL) {
+                printf("[mos qry]: Attribute for EXPAND operation not found. Invalid query.\n");
+                return -1;
+            }
+
+            idx_context.kind.hmap.records_region = &storage->records_region;
+            idx_context.operation.expand.expand_attr = *attribute;
+
+            curr_step->sub_step_count = search_step->step_count;
+            curr_step->attr_query = search_step->attribute_query;
+            curr_step->idx_context = idx_context;
+
+            exec_stack->top++;
+            return mos_qry_build_exec_stack(storage, exec_stack, search_step->sub_steps[0]);
+        } else {
+            curr_step->sub_step_count = 0;
+            curr_step->attr_query = search_step->attribute_query;
+            curr_step->idx_context = idx_context;
+        }
     } else {
         curr_step->sub_step_count = search_step->step_count;
 
         if(search_step->step_count > 0) {
+            uint64_t return_ok = 0;
             for (int i = search_step->step_count - 1; i >= 0; i--) {
                 exec_stack->top++;
-                mos_qry_build_exec_stack(storage, exec_stack, search_step->sub_steps[i]);
-            } 
+                return_ok |= mos_qry_build_exec_stack(storage, exec_stack, search_step->sub_steps[i]);
+            }
+            return return_ok;
         }
     }
+    return 0;
 }
 
 /**
@@ -320,6 +349,61 @@ static inline void mos_qry_execute_leaf(mos_t_qry_bmp_exec_step* exec, mos_t_qry
     mos_qry_bitmap_result_push(stack, bm);
 }
 
+static inline int mos_qry_cmp_u64(const void* n1, const void* n2) {
+    uint64_t x = *(const uint64_t*)n1, y = *(const uint64_t*)n2;
+    return (x > y) - (x < y);
+}
+
+static inline void mos_qry_execute_expand(mos_t_qry_bmp_exec_step* exec, mos_t_qry_bmp_stack* stack) {
+    // check if there is a result to expand
+    if(stack->result_top == 0) {
+        printf("[mos qry]: There is no result to expand. Result stack is empty.\n");
+        return;
+    }
+    // currently this holds the result of the subquery. We are logically ORing all expanded bitmaps to it.
+    mos_t_qry_bmp* latest_result_bmp = mos_qry_bitmap_result_pop(stack);
+
+    mos_t_idx_context idx_context = exec->idx_context;
+    mos_t_attr expand_attr = idx_context.operation.expand.expand_attr;
+    mos_t_header* mmap_header = mos_accessor_header(&idx_context.kind.hmap.header_region);
+    uint64_t row_ids_count = mos_qry_bmp_count_ones(latest_result_bmp);
+    uint64_t ids_buffer[row_ids_count];
+    uint64_t actual_row_ids_count = mos_qry_bmp_get_row_ids(latest_result_bmp, ids_buffer);
+
+    if(actual_row_ids_count != row_ids_count) {
+        printf("[mos qry]: Missmatch in row ids count. %" PRIu64 " expected, %" PRIu64 " actual.\n", row_ids_count, actual_row_ids_count);
+        return;
+    }
+
+    for(uint64_t i = 0; i < actual_row_ids_count; i++) {
+        mos_t_record* record = mos_accessor_record(&idx_context.kind.hmap.records_region, ids_buffer[i], mmap_header->layout.record_size);
+        uint8_t* attribute_value = mos_accessor_record_attribute(record, &expand_attr);
+        //overwrite id with "group_id" as row_id is no longer needed
+        memcpy(&ids_buffer[i], attribute_value, expand_attr.byte_size_internal);
+    }
+
+    qsort(ids_buffer, actual_row_ids_count, sizeof(uint64_t), mos_qry_cmp_u64);
+
+    for(uint64_t i = 0; i < actual_row_ids_count; i++) {
+        if(i > 0 && ids_buffer[i] == ids_buffer[i-1]) {
+            continue;
+        }
+
+        mos_t_qry_attr_qry attr_qry = {
+            .value = {
+                .byte_length = expand_attr.byte_size_internal,
+                .int_val = ids_buffer[i]
+            }
+        };
+        // attribute name might not be needed here
+        strncpy(attr_qry.attribute_name, expand_attr.name, sizeof(attr_qry.attribute_name) - 1);
+        attr_qry.attribute_name[sizeof(attr_qry.attribute_name) - 1] = '\0';
+        mos_idx_bitmap_search(&idx_context, latest_result_bmp, &attr_qry);
+    }
+
+    mos_qry_bitmap_result_push(stack, latest_result_bmp);
+}
+
 mos_t_qry_bmp* mos_qry_execute(const mos_t_qry_bmp_exec_stack* query_exec, mos_t_qry_bmp_stack* stack) {
     mos_t_qry_bmp_exec_step** steps = query_exec->exec_steps;
     for (int i = query_exec->top; i >= 0; i--) {
@@ -337,6 +421,20 @@ mos_t_qry_bmp* mos_qry_execute(const mos_t_qry_bmp_exec_stack* query_exec, mos_t
             case MOS_QRY_OP_EQ:
             case MOS_QRY_OP_SIMILAR:
                 mos_qry_execute_leaf(step, stack);
+                break;
+            /*
+                We need the EXPAND operation to expand the former result bitmap to a group of row_ids 
+                 that share the same attribute value.
+                An example would be files. Someone stores pdf pages as records. Every page gets a record id.
+                The sub-query A matches a text on page 4 and another sub-query B matches a vector (photo, whatever) on page 6.
+                If we would logically AND the two bitmaps, the resulting bitmap would be empty.
+                If we first expand all active bits (record ids) of the sub-queries by the attribute filepath,
+                 the result would be that sub-queries A and B both have pages 4 and 6 active 
+                 and a logical AND would not miss the pages.
+                This works because page 4 and page 6 share the same attribute value for filepath.
+            */
+            case MOS_QRY_OP_EXPAND:
+                mos_qry_execute_expand(step, stack);
                 break;
             default:
                 //always false, but should print the string

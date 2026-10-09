@@ -27,7 +27,7 @@ static inline mos_t_arena_region_header* mos_arena_accessor_header(mos_t_mapped_
 static inline uint8_t* mos_arena_accessor(mos_t_mapped_region* mmap_arena_region, mos_t_arena_offset* arena_offset) {
     if(mmap_arena_region->region_byte_size < arena_offset->arena_offset 
         || mmap_arena_region->region_byte_size < (arena_offset->arena_offset + arena_offset->arena_size)) {
-        printf("Provided mmap region of size %zu is not big enough to access area of size %" PRId64 " at offset %" PRId64 "\n", mmap_arena_region->region_byte_size, arena_offset->arena_size, arena_offset->arena_offset);
+        printf("[mos_arena]: Provided mmap region of size %zu is not big enough to access area of size %" PRId64 " at offset %" PRId64 "\n", mmap_arena_region->region_byte_size, arena_offset->arena_size, arena_offset->arena_offset);
         return NULL;
     }
     return ((uint8_t*)mmap_arena_region->region_base) + arena_offset->arena_offset;

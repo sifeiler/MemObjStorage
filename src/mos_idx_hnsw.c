@@ -718,7 +718,7 @@ int mos_idx_hnsw_put(const mos_t_idx_context* idx_context, const uint8_t* key, c
     assert(index_header->node_count <= index_header->node_capacity);
 
     if(index_header->node_count == index_header->node_capacity) {
-        printf("HNSW index is full. Cannot put any more vectors.");
+        printf("[mos_idx_hnsw]: HNSW index is full. Cannot put any more vectors.\n");
         return MOS_IDX_HNSW_ERR_FULL_INDEX;
     }
 
@@ -858,7 +858,7 @@ int mos_idx_hnsw_put(const mos_t_idx_context* idx_context, const uint8_t* key, c
     if(result) {
         result->put_result = malloc(sizeof(new_node_id));
         if(!result->put_result) {
-            mos_utils_report_error("Allocation failure for HNSW put result.");
+            mos_utils_report_error("[mos_idx_hnsw]: Allocation failure for HNSW put result.");
             return MOS_IDX_HNSW_ERR_INVALID_ARGS;
         }
         memcpy(result->put_result, &new_node_id, sizeof(new_node_id));

@@ -22,7 +22,7 @@ static inline void mos_utils_report_error(const char* input, ...) {
     va_list args;
     va_start(args, input);
 
-    printf("Error: %s, Message: ", strerror(errno));
+    printf("Error: %s, Message:", strerror(errno));
 
     vprintf(input, args);
     printf("\n");

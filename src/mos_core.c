@@ -284,14 +284,14 @@ mos_t_config* mos_init_internal_config(mos_t_storage_config* external_cfg) {
     mos_t_config* internal_cfg = calloc(1, sizeof(mos_t_config));
 
     if(!internal_cfg) {
-        mos_utils_report_error("Allocation error. mos_t_storage_config cannot be allocated. Cannot initialize internal config.");
+        mos_utils_report_error("[mos_core]: Allocation error. mos_t_storage_config cannot be allocated. Cannot initialize internal config.\n");
         return NULL;
     }
 
     mos_t_attr* internal_attributes = calloc(external_cfg->attribute_count, sizeof(mos_t_attr));
     if(!internal_attributes) {
         free(internal_cfg);
-        mos_utils_report_error("Allocation error. mos_t_attr_internal cannot be allocated. Cannot initialize internal config.");
+        mos_utils_report_error("[mos_core]: Allocation error. mos_t_attr_internal cannot be allocated. Cannot initialize internal config.\n");
         return NULL;
     }
 
@@ -300,7 +300,7 @@ mos_t_config* mos_init_internal_config(mos_t_storage_config* external_cfg) {
     if(!index_descriptors) {
         free(internal_cfg);
         free(internal_attributes);
-        mos_utils_report_error("Allocation error. mos_t_idx cannot be allocated. Cannot initialize internal config.");
+        mos_utils_report_error("[mos_core]: Allocation error. mos_t_idx cannot be allocated. Cannot initialize internal config.\n");
         return NULL;
     }
 
@@ -332,7 +332,7 @@ mos_t_config* mos_init_internal_config(mos_t_storage_config* external_cfg) {
                     found = 1;
                     if(actual_indexes_count == (external_cfg->index_count + 1)) {
                         //too many indexes
-                        mos_utils_report_error("Invalid mos_t_config. Surpassing expected index_count.");
+                        mos_utils_report_error("[mos_core]: Invalid mos_t_config. Surpassing expected index_count.\n");
                         return NULL;
                     }
                     
@@ -343,12 +343,16 @@ mos_t_config* mos_init_internal_config(mos_t_storage_config* external_cfg) {
                     memcpy(&index_desc->params, &idx_config->params, sizeof(index_desc->params));
                     index_desc->id = actual_indexes_count++;
                     mos_idx_set_field_index_size(external_cfg->max_records, index_desc);
-                    internal_attribute->indexed = 1;
+
+                    internal_attribute->flags |= MOS_ATTR_FLAG_INDEXED;
+                    if(external_attribute.groupable) {
+                        internal_attribute->flags |= MOS_ATTR_FLAG_GROUPABLE;
+                    }
                 }
             }
             if(found == 0) {
                 //attribute should be indexed but index configuration is missing -> invalid configuration
-                mos_utils_report_error("Invalid mos_t_config. Missing index configuration for attribute %s", external_attribute.name);
+                mos_utils_report_error("[mos_core]: Invalid mos_t_storage_config. Missing index configuration for attribute %s\n", external_attribute.name);
                 return NULL;
             }
         }
@@ -391,22 +395,22 @@ mos_t_config* mos_init_internal_config(mos_t_storage_config* external_cfg) {
 
 int mos_validate_config(mos_t_storage_config* cfg) {
     if(cfg == NULL) {
-        mos_utils_report_error("mos_t_config is NULL. mos_t_config is invalid.");
+        mos_utils_report_error("[mos_core]: Invalid mos_t_storage_config. config is NULL.\n");
         return INVALID;
     }
 
     if(cfg->max_records == 0) {
-        mos_utils_report_error("mos_t_config->max_records is 0. mos_t_config is invalid.");
+        mos_utils_report_error("[mos_core]: Invalid mos_t_storage_config. max_records is 0.\n");
         return INVALID;
     }
 
     if(cfg->attribute_count == 0) {
-        mos_utils_report_error("mos_t_config->attribute_count is 0. mos_t_config is invalid.");
+        mos_utils_report_error("[mos_core]: Invalid mos_t_storage_config. attribute_count is 0.\n");
         return INVALID;
     }
 
     if(*cfg->storage_path == '\0') {
-        mos_utils_report_error("mos_t_config->storage_path is 0. mos_t_config is invalid.");
+        mos_utils_report_error("[mos_core]: Invalid mos_t_storage_config. storage_path is 0.\n");
         return INVALID;
     }
 
@@ -414,17 +418,27 @@ int mos_validate_config(mos_t_storage_config* cfg) {
         mos_t_attr_config attribute = cfg->attributes[i];
 
         if(attribute.name[0] == '\0') {
-            mos_utils_report_error("attribute name is not set. mos_t_config is invalid.");
+            mos_utils_report_error("[mos_core]: Invalid mos_t_storage_config. Attribute name is not set.\n");
             return INVALID;
         }
 
         if(attribute.byte_size == 0) {
-            mos_utils_report_error("attribute byte_size is 0. mos_t_config is invalid.");
+            mos_utils_report_error("[mos_core]: Invalid mos_t_storage_config. Attribute byte_size is 0.\n");
             return INVALID;
         }
 
         if(attribute.type < MOS_ATTR_MIN || attribute.type >= MOS_ATTR_MAX) {
-            mos_utils_report_error("attribute type is invalid. mos_t_config is invalid.");
+            mos_utils_report_error("[mos_core]: Invalid mos_t_storage_config. Attribute type is invalid.\n");
+            return INVALID;
+        }
+
+        if(attribute.groupable && !attribute.indexed) {
+            mos_utils_report_error("[mos_core]: Invalid mos_t_storage_config. Attribute has to be flagged indexed when flagged groupable.\n");
+            return INVALID;
+        }
+
+        if(attribute.groupable && ((attribute.type & MOS_ATTR_TYPES_GROUPABLE) == 0)) {
+            mos_utils_report_error("[mos_core]: Invalid mos_t_storage_config. Attribute is flagged groupable, but attribute type does not support grouping. Use integer types.\n");
             return INVALID;
         }
 
@@ -439,12 +453,12 @@ int mos_validate_config(mos_t_storage_config* cfg) {
             }
             if(!attr_idx_config) {
                 //attribute should be indexed but index configuration is missing -> invalid configuration
-                mos_utils_report_error("Invalid mos_t_config. Missing index configuration for attribute %s", attribute.name);
+                mos_utils_report_error("[mos_core]: Invalid mos_t_storage_config. Missing index configuration for attribute %s\n", attribute.name);
                 return INVALID;
             }
             if(!mos_attr_supports_index(attribute.type, attr_idx_config->type)) {
                 //attribute should be indexed but provided index is not compatible with attribute type -> invalid configuration
-                mos_utils_report_error("Invalid mos_t_config. Index %s not compatible with attribute %s", MOS_IDX_TYPE_NAMES[attr_idx_config->type], attribute.name);
+                mos_utils_report_error("[mos_core]: Invalid mos_t_storage_config. Index %s not compatible with attribute %s\n", MOS_IDX_TYPE_NAMES[attr_idx_config->type], attribute.name);
                 return INVALID;
             }
         }
@@ -456,7 +470,7 @@ int mos_validate_config(mos_t_storage_config* cfg) {
             uint64_t end_1 = attribute.field_offset + attribute.byte_size;
             uint64_t end_2 = attribute2.field_offset + attribute2.byte_size;
             if(start_1 < end_2 && start_2 < end_1) {
-                mos_utils_report_error("Invalid mos_t_config. Attributes %s and %s are overlapping", attribute.name, attribute2.name);
+                mos_utils_report_error("[mos_core]: Invalid mos_t_storage_config. Attributes %s and %s are overlapping", attribute.name, attribute2.name);
                 return INVALID;
             }
         }
@@ -486,11 +500,11 @@ int mos_create_index_mmap_regions(const char* dir_path, mos_t_idx_descriptor* id
 
         char mmap_path[MOS_PATH_MAX];
         if(mos_os_path_join(mmap_path, sizeof(mmap_path), dir_path, file_name) != 0) {
-            printf("Couldn't join path for mmapped file of index %u.\n", (unsigned)idx_desc->id);
+            printf("[mos_core]: Couldn't join path for mmapped file of index %u.\n", (unsigned)idx_desc->id);
             return -1;
         }
         if(mos_memory_region_open(mmap_path, idx_desc->index_size, MOS_PAGE_SIZE, &regions_out[i]) != 0) {
-            printf("Couldn't open mmapped region of index %u.\n", (unsigned)idx_desc->id);
+            printf("[mos_core]: Couldn't open mmapped region of index %u.\n", (unsigned)idx_desc->id);
             return -1;
         }
     }
@@ -499,13 +513,13 @@ int mos_create_index_mmap_regions(const char* dir_path, mos_t_idx_descriptor* id
 
 mos_t_storage* mos_load_storage(const char* dir_path) {
     if(dir_path == NULL) {
-        mos_utils_report_error("Invalid argument dir_path is NULL. Cannot load storage files.\n");
+        mos_utils_report_error("[mos_core]: Invalid argument dir_path is NULL. Cannot load storage files.\n");
         return NULL;
     }
 
     char mmap_path_header[MOS_PATH_MAX];    
     if(mos_os_path_join(mmap_path_header, sizeof(mmap_path_header), dir_path, "mos_header.mos") != 0) {
-        mos_utils_report_error("Couldn't join path for mmapped file header. Storage load failed.\n");
+        mos_utils_report_error("[mos_core]: Couldn't join path for mmapped file header. Storage load failed.\n");
         return NULL;
     }
 
@@ -514,14 +528,14 @@ mos_t_storage* mos_load_storage(const char* dir_path) {
 
     //at this point, we do not know the full size of the header. So map the first page, which contains the memory layout.
     if(mos_memory_region_open(mmap_path_header, header_page_size, MOS_PAGE_SIZE, &header_region_first_page) != 0) {
-        mos_utils_report_error("Cannot load storage file. Failed to map header pages of file %s.\n", mmap_path_header);
+        mos_utils_report_error("[mos_core]: Cannot load storage file. Failed to map header pages of file %s.\n", mmap_path_header);
         return NULL;
     }
 
     mos_t_header* mmap_header_first_page = mos_accessor_header(&header_region_first_page);
     
     if(mmap_header_first_page->identifier != MOS_FILE_ID) {
-        printf("Cannot load storage file %s. File header is invalid.", mmap_path_header);
+        printf("[mos_core]: Cannot load storage file %s. File header is invalid.\n", mmap_path_header);
         return NULL;
     }
 
@@ -529,7 +543,7 @@ mos_t_storage* mos_load_storage(const char* dir_path) {
     mos_t_layout layout = mmap_header_first_page->layout;
 
     if(mos_memory_region_close(&header_region_first_page) != 0) {
-        mos_utils_report_error("Cannot load storage file. Failed to unmap the first memory page (header with layout) of file %s.\n", mmap_path_header);
+        mos_utils_report_error("[mos_core]: Cannot load storage file. Failed to unmap the first memory page (header with layout) of file %s.\n", mmap_path_header);
         return NULL;
     }
 
@@ -548,13 +562,13 @@ mos_t_storage* mos_load_storage(const char* dir_path) {
     path_join_result &= mos_os_path_join(mmap_path_arena, sizeof(mmap_path_arena), dir_path, "mos_arena.mos");
 
     if(path_join_result != 0) {
-        printf("Couldn't join paths for mmapped files. Storage load failed.\n");
+        printf("[mos_core]: Couldn't join paths for mmapped files. Storage load failed.\n");
         return NULL;
     }
 
     mos_t_storage* storage = (mos_t_storage*)calloc(1, sizeof(mos_t_storage));
     if(!storage) {
-        mos_utils_report_error("Failed to allocate memory. Storage load failed.\n");
+        mos_utils_report_error("[mos_core]: Failed to allocate memory. Storage load failed.\n");
         return NULL;
     }
 
@@ -581,7 +595,7 @@ mos_t_storage* mos_load_storage(const char* dir_path) {
     region_open_result &= mos_create_index_mmap_regions(dir_path, mmap_index_descriptors, mmap_header->index_count, storage->index_regions);
 
     if(region_open_result != 0) {
-        printf("Couldn't open a mmapped region. Storage load failed.\n");
+        printf("[mos_core]: Couldn't open a mmapped region. Storage load failed.\n");
         mos_free_storage(storage);
         return NULL;
     }
@@ -603,18 +617,18 @@ void mos_free_storage_config(mos_t_config* cfg) {
 
 mos_t_storage* mos_create_storage(const char* dir_path, mos_t_storage_config* external_cfg) {
     if(dir_path == NULL) {
-        mos_utils_report_error("Invalid argument dir_path is NULL. Cannot create storage files.\n");
+        mos_utils_report_error("[mos_core]: Invalid argument dir_path is NULL. Cannot create storage files.\n");
         return NULL;
     }
     
     if(mos_validate_config(external_cfg) == INVALID) {
-        mos_utils_report_error("Invalid mos_t_config. Cannot create storage file.\n");
+        mos_utils_report_error("[mos_core]: Invalid mos_t_config. Cannot create storage file.\n");
         return NULL;
     }
     
     mos_t_config* internal_cfg = mos_init_internal_config(external_cfg);
     if(!internal_cfg) {
-        mos_utils_report_error("Cannot create storage: internal config initialization failed.\n");
+        mos_utils_report_error("[mos_core]: Cannot create storage: internal config initialization failed.\n");
         return NULL;
     }
     
@@ -638,14 +652,14 @@ mos_t_storage* mos_create_storage(const char* dir_path, mos_t_storage_config* ex
     path_join_result &= mos_os_path_join(mmap_path_arena, sizeof(mmap_path_arena), dir_path, "mos_arena.mos");
 
     if(path_join_result != 0) {
-        printf("Couldn't join paths for mmapped files. Storage creation failed.\n");
+        printf("[mos_core]: Couldn't join paths for mmapped files. Storage creation failed.\n");
         mos_free_storage_config(internal_cfg);
         return NULL;
     }
 
     mos_t_storage* storage = (mos_t_storage*)calloc(1, sizeof(mos_t_storage));
     if(!storage) {
-        mos_utils_report_error("Failed to allocate memory. Storage load failed.\n");
+        mos_utils_report_error("[mos_core]: Failed to allocate memory. Storage load failed.\n");
         return NULL;
     }
 
@@ -671,7 +685,7 @@ mos_t_storage* mos_create_storage(const char* dir_path, mos_t_storage_config* ex
     region_open_result &= mos_create_index_mmap_regions(dir_path, internal_cfg->indexes, internal_cfg->index_count, storage->index_regions);
 
     if(region_open_result != 0) {
-        printf("Couldn't open a mmapped region. Storage creation failed.\n");
+        printf("[mos_core]: Couldn't open a mmapped region. Storage creation failed.\n");
         mos_free_storage_config(internal_cfg);
         mos_free_storage(storage);
         return NULL;
@@ -777,7 +791,7 @@ void mos_storage_put(mos_t_storage* storage, uint64_t id, void* record_data) {
         mos_put_internal(storage, id, record_data, next_free_row_id);
         mmap_header->state.next_free_row_id += 1;
     } else {
-        mos_utils_report_error("Cannot put record in storage file. Storage is full.");
+        mos_utils_report_error("[mos_core]: Cannot put record in storage file. Storage is full.");
     }
 }
 
@@ -858,12 +872,12 @@ const void* mos_storage_get(mos_t_storage* storage, uint64_t id) {
 
     mos_t_id_list result_ids = {0};
     if(mos_idx_get(&idx_context, key_ptr, &result_ids) != 0) {
-        printf("Record %" PRId64 " not found.", id);
+        printf("[mos_core]: Record %" PRId64 " not found.\n", id);
         return NULL;
     }
 
     if(result_ids.count != 1) {
-        printf("Cannot get record with unique id %" PRId64 ". More than one record found for this id.", id);
+        printf("[mos_core]: Cannot get record with unique id %" PRId64 ". More than one record found for this id.\n", id);
         return NULL;
     }
 
@@ -876,7 +890,7 @@ const mos_t_qry_bmp* mos_storage_search(mos_t_storage* storage, mos_t_qry* query
 
 void mos_storage_remove(mos_t_storage* storage, uint64_t id) {
     if(!storage) {
-        mos_utils_report_error("Cannot remove. mos_t_storage instance is null.");
+        mos_utils_report_error("[mos_core]: Cannot remove. mos_t_storage instance is null.");
         return;
     }
 
@@ -892,12 +906,12 @@ void mos_storage_remove(mos_t_storage* storage, uint64_t id) {
     uint8_t* key_ptr = (uint8_t*)&id;
     mos_t_id_list result_ids = {0};
     if(mos_idx_get(&idx_context, key_ptr, &result_ids) != 0) {
-        printf("Nothing to remove. Record %" PRId64 " not found.", id);
+        printf("[mos_core]: Nothing to remove. Record %" PRId64 " not found.\n", id);
         return;
     }
 
     if(result_ids.count != 1) {
-        printf("Cannot remove record with id %" PRId64 ". More than one record found for this id.", id);
+        printf("[mos_core]: Cannot remove record with id %" PRId64 ". More than one record found for this id.\n", id);
         return;
     }
 
@@ -932,33 +946,33 @@ void mos_storage_remove(mos_t_storage* storage, uint64_t id) {
 }
 
 void mos_print_header(mos_t_header* header) {
-    printf("Storage Header:\n");
-    printf("------------------\n");
-    printf("identifier %" PRIu64 "\n", header->identifier);
-    printf("attribute_count %" PRIu64 "\n", header->attribute_count);
-    printf("index_count %" PRIu64 "\n", header->index_count);
-    printf("max_records %" PRIu64 "\n", header->max_records);
+    printf("[mos_core]: Storage Header:\n");
+    printf("[mos_core]: ------------------\n");
+    printf("[mos_core]: identifier %" PRIu64 "\n", header->identifier);
+    printf("[mos_core]: attribute_count %" PRIu64 "\n", header->attribute_count);
+    printf("[mos_core]: index_count %" PRIu64 "\n", header->index_count);
+    printf("[mos_core]: max_records %" PRIu64 "\n", header->max_records);
 
     mos_print_layout(&header->layout);
-
-    printf("\nStorage Header State:\n");
-    printf("------------------\n");
-    printf("next_free_row_id %" PRIu64 "\n", header->state.next_free_row_id);
-    printf("last_deleted_row_id %" PRIu64 "\n", header->state.last_deleted_row_id);
-    printf("last_deleted string length %" PRIu32 "\n", header->string_silo.last_deleted.str_len);
-    printf("last_deleted string offset %" PRIu64 "\n", header->string_silo.last_deleted.str_offset);
+    printf("\n");
+    printf("[mos_core]: Storage Header State:\n");
+    printf("[mos_core]: ------------------\n");
+    printf("[mos_core]: next_free_row_id %" PRIu64 "\n", header->state.next_free_row_id);
+    printf("[mos_core]: last_deleted_row_id %" PRIu64 "\n", header->state.last_deleted_row_id);
+    printf("[mos_core]: last_deleted string length %" PRIu32 "\n", header->string_silo.last_deleted.str_len);
+    printf("[mos_core]: last_deleted string offset %" PRIu64 "\n", header->string_silo.last_deleted.str_offset);
 }
 
 void mos_print_layout(mos_t_layout* layout) {
-    printf("Storage Header Sizes:\n");
-    printf("------------------\n");
-    printf("header_size %" PRIu64 "\n", layout->header_size);
-    printf("valid_bitmap_size %" PRIu64 "\n", layout->valid_bitmap_size);
-    printf("ready_bitmap_size %" PRIu64 "\n", layout->ready_bitmap_size);
-    printf("record_size %" PRIu64 "\n", layout->record_size);
-    printf("record_data_size %" PRIu64 "\n", layout->record_data_size);
-    printf("records_size %" PRIu64 "\n", layout->records_size);
-    printf("string_silo_size %" PRIu64 "\n", layout->string_silo_size);
+    printf("[mos_core]: Storage Header Sizes:\n");
+    printf("[mos_core]: ------------------\n");
+    printf("[mos_core]: header_size %" PRIu64 "\n", layout->header_size);
+    printf("[mos_core]: valid_bitmap_size %" PRIu64 "\n", layout->valid_bitmap_size);
+    printf("[mos_core]: ready_bitmap_size %" PRIu64 "\n", layout->ready_bitmap_size);
+    printf("[mos_core]: record_size %" PRIu64 "\n", layout->record_size);
+    printf("[mos_core]: record_data_size %" PRIu64 "\n", layout->record_data_size);
+    printf("[mos_core]: records_size %" PRIu64 "\n", layout->records_size);
+    printf("[mos_core]: string_silo_size %" PRIu64 "\n", layout->string_silo_size);
 }
 
 void mos_print_info(mos_t_storage* storage) {
@@ -970,8 +984,9 @@ void mos_print_state(mos_t_storage* storage) {
     mos_t_header* mmap_header = mos_accessor_header(&storage->header_region);
     mos_t_state state = mmap_header->state;
 
-    printf("\nStorage State:\n");
-    printf("------------------\n");
-    printf("next_free_row_id %" PRIu64 "\n", state.next_free_row_id);
-    printf("last_deleted_row_id %" PRIu64 "\n", state.last_deleted_row_id);
+    printf("\n");
+    printf("[mos_core]: Storage State:\n");
+    printf("[mos_core]: ------------------\n");
+    printf("[mos_core]: next_free_row_id %" PRIu64 "\n", state.next_free_row_id);
+    printf("[mos_core]: last_deleted_row_id %" PRIu64 "\n", state.last_deleted_row_id);
 }

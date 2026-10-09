@@ -39,7 +39,7 @@ void setUp(void) {
         .field_offset_internal = 0,
         .byte_size_external = EXTERNAL_TYPE_SIZES[MOS_ATTR_TYPE_UINT64],
         .byte_size_internal = INTERNAL_TYPE_SIZES[MOS_ATTR_TYPE_INTERNAL_UINT64],
-        .indexed = 1
+        .flags = MOS_ATTR_FLAG_INDEXED
     };
     mos_t_attr prop2 = {
         .name = "prop2",
@@ -48,7 +48,7 @@ void setUp(void) {
         .field_offset_internal = prop1.byte_size_internal,
         .byte_size_external = EXTERNAL_TYPE_SIZES[MOS_ATTR_TYPE_STRING],
         .byte_size_internal = INTERNAL_TYPE_SIZES[MOS_ATTR_TYPE_INTERNAL_STRING_DESC],
-        .indexed = 0
+        .flags = 0
     };
     test_config.attributes[0] = prop1;
     test_config.attributes[1] = prop2;
@@ -286,8 +286,8 @@ void test_mos_storage_put__put_records(void) {
 }
 
 void print_record(TestEntry* entry) {
-    printf("Testentry Prop1: %" PRId64 "\n", entry->prop1);
-    printf("Testentry Prop2: %s\n", entry->prop2.str);
+    printf("[mos_test_stroage_put]: Testentry Prop1: %" PRId64 "\n", entry->prop1);
+    printf("[mos_test_stroage_put]: Testentry Prop2: %s\n", entry->prop2.str);
 }
 
 int main(void) {

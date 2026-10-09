@@ -217,7 +217,7 @@ void mos_test_mos_create_storage__check_attribute_area(void) {
         .field_offset_internal = 0,
         .byte_size_external = EXTERNAL_TYPE_SIZES[MOS_ATTR_TYPE_UINT64],
         .byte_size_internal = INTERNAL_TYPE_SIZES[MOS_ATTR_TYPE_INTERNAL_UINT64],
-        .indexed = 1
+        .flags = MOS_ATTR_FLAG_INDEXED
     };
     mos_t_attr prop2 = {
         .name = "prop2",
@@ -226,7 +226,7 @@ void mos_test_mos_create_storage__check_attribute_area(void) {
         .field_offset_internal = prop1.byte_size_internal,
         .byte_size_external = EXTERNAL_TYPE_SIZES[MOS_ATTR_TYPE_UINT64],
         .byte_size_internal = INTERNAL_TYPE_SIZES[MOS_ATTR_TYPE_INTERNAL_UINT64],
-        .indexed = 0
+        .flags = 0
     };
     expected_attributes[0] = prop1;
     expected_attributes[1] = prop2;
@@ -245,17 +245,17 @@ void mos_test_mos_create_storage__check_attribute_area(void) {
 
 void print_storage_index(const mos_t_idx_descriptor* idx) {
     if (idx == NULL) {
-        printf("idx: NULL\n");
+        printf("[mos_test_create_storage]: idx: NULL\n");
         return;
     }
 
-    printf("--- mos_t_idx Instance ---\n");
-    printf("Id:        %d\n", idx->id);
-    printf("Type:        %d\n", idx->type);
-    printf("Index Size:  %zu bytes\n", (size_t)idx->index_size);
-    printf("Index Region Pos: 0x%08lX\n", (unsigned long)idx->index_region_pos);
-    printf("Attr Name: %s\n", idx->attribute_name);
-    printf("---------------------------\n");
+    printf("[mos_test_create_storage]: --- mos_t_idx Instance ---\n");
+    printf("[mos_test_create_storage]: Id:        %d\n", idx->id);
+    printf("[mos_test_create_storage]: Type:        %d\n", idx->type);
+    printf("[mos_test_create_storage]: Index Size:  %zu bytes\n", (size_t)idx->index_size);
+    printf("[mos_test_create_storage]: Index Region Pos: 0x%08lX\n", (unsigned long)idx->index_region_pos);
+    printf("[mos_test_create_storage]: Attr Name: %s\n", idx->attribute_name);
+    printf("[mos_test_create_storage]: ---------------------------\n");
 }
 
 void mos_test_mos_create_storage__check_index_area(void) {

@@ -16,7 +16,8 @@
  */
 void mos_qry_calc_exec_stack_size(mos_t_qry_search_step* step, uint64_t* exec_stack_count) {
     (*exec_stack_count)++;
-    if(step->op & MOS_QRY_LOGICAL_OP) {
+    // EXPAND has a single substep
+    if(step->op & (MOS_QRY_LOGICAL_OP | MOS_QRY_OP_EXPAND)) {
         for (uint64_t i = 0; i < step->step_count; i++) {
             mos_qry_calc_exec_stack_size(step->sub_steps[i], exec_stack_count);
         }
@@ -24,7 +25,7 @@ void mos_qry_calc_exec_stack_size(mos_t_qry_search_step* step, uint64_t* exec_st
 }
 
 /**
- * Calculates the amount of bitmaps needed to run the passed QueryExecStack.
+ * Calculates the amount of bitmaps needed to run the passed mos_t_qry_bmp_exec_stack.
  * The amount of bitmaps needed is the maximum of execution steps per level of execution (over all levels).
  */
 uint64_t mos_qry_calc_bitmap_stack_size(const mos_t_qry_bmp_exec_stack* exec) {
@@ -363,9 +364,15 @@ static inline void mos_qry_execute_expand(mos_t_qry_bmp_exec_step* exec, mos_t_q
     // currently this holds the result of the subquery. We are logically ORing all expanded bitmaps to it.
     mos_t_qry_bmp* latest_result_bmp = mos_qry_bitmap_result_pop(stack);
 
+    if(latest_result_bmp->empty) {
+        //there is nothing to expand
+        mos_qry_bitmap_result_push(stack, latest_result_bmp);
+        return;
+    }
+
     mos_t_idx_context idx_context = exec->idx_context;
     mos_t_attr expand_attr = idx_context.operation.expand.expand_attr;
-    mos_t_header* mmap_header = mos_accessor_header(&idx_context.kind.hmap.header_region);
+    mos_t_header* mmap_header = mos_accessor_header(idx_context.kind.hmap.header_region);
     uint64_t row_ids_count = mos_qry_bmp_count_ones(latest_result_bmp);
     uint64_t ids_buffer[row_ids_count];
     uint64_t actual_row_ids_count = mos_qry_bmp_get_row_ids(latest_result_bmp, ids_buffer);
@@ -376,7 +383,7 @@ static inline void mos_qry_execute_expand(mos_t_qry_bmp_exec_step* exec, mos_t_q
     }
 
     for(uint64_t i = 0; i < actual_row_ids_count; i++) {
-        mos_t_record* record = mos_accessor_record(&idx_context.kind.hmap.records_region, ids_buffer[i], mmap_header->layout.record_size);
+        mos_t_record* record = mos_accessor_record(idx_context.kind.hmap.records_region, ids_buffer[i], mmap_header->layout.record_size);
         uint8_t* attribute_value = mos_accessor_record_attribute(record, &expand_attr);
         //overwrite id with "group_id" as row_id is no longer needed
         memcpy(&ids_buffer[i], attribute_value, expand_attr.byte_size_internal);
@@ -391,6 +398,7 @@ static inline void mos_qry_execute_expand(mos_t_qry_bmp_exec_step* exec, mos_t_q
 
         mos_t_qry_attr_qry attr_qry = {
             .value = {
+                .type = MOS_ATTR_TYPE_UINT64,
                 .byte_length = expand_attr.byte_size_internal,
                 .int_val = ids_buffer[i]
             }

@@ -7,7 +7,7 @@ CFLAGS_COMMON = -Wall -Wextra -Iinclude -g $(SANITIZERS) -fno-omit-frame-pointer
 
 CFLAGS = $(CFLAGS_COMMON) -O0 -mavx2 -mfma -g -D_GNU_SOURCE
 CFLAGS_TEST = $(CFLAGS_COMMON) -O0 -mavx2 -mfma -g -D_GNU_SOURCE
-CFLAGS_RELEASE = -Wall -Wextra -Iinclude -O3 -march=native -mavx2 -mfma -DNDEBUG -g -fno-omit-frame-pointer -fno-optimize-sibling-calls
+CFLAGS_RELEASE = -Wall -Wextra -Iinclude -O3 -march=native -mavx2 -mfma -DNDEBUG -g -fno-omit-frame-pointer -fno-optimize-sibling-calls -D_GNU_SOURCE
 
 # Directories
 SRC_DIR = src

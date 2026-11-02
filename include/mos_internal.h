@@ -369,8 +369,8 @@ static inline mos_t_record* mos_accessor_record(mos_t_mapped_region* region, uin
     return (mos_t_record*)((char*)region->region_base + record_row_id * record_size);
 }
 
-static inline mos_t_record* mos_accessor_record_attribute(mos_t_record* record, mos_t_attr* attribute) {
-    return (uint8_t*)(record->data[attribute->field_offset_internal]);
+static inline uint8_t* mos_accessor_record_attribute(mos_t_record* record, mos_t_attr* attribute) {
+    return (uint8_t*)(&record->data[attribute->field_offset_internal]);
 }
 
 static const char* const MOS_IDX_TYPE_NAMES[] = {

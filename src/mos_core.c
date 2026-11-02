@@ -700,7 +700,6 @@ mos_t_storage* mos_create_storage(const char* dir_path, mos_t_storage_config* ex
     mmap_storage_header->max_records = internal_cfg->max_records;
     memcpy(&(mmap_storage_header->layout), &layout, sizeof(mos_t_layout));
 
-    //TODO: String silo grows bottom up. This is a leftover from earlier single mmapped-file design. This will lead to issues on resize. Fix that!!!
     mos_t_string_silo* mmap_string_silo = &mmap_storage_header->string_silo;
     mmap_string_silo->current_offset = 0;
     mmap_string_silo->size = layout.string_silo_size;
